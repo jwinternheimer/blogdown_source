@@ -1,4 +1,4 @@
-baseurl = "https://jwinternheimer.github.io/"
+baseurl = "https://jwinternheimer.github.io"
 DefaultContentLanguage = "en"
 #DefaultContentLanguage = "ja"
 title = "Is That Your Analysis?"
@@ -8,7 +8,7 @@ pygmentsUseClasses = true
 pygmentCodeFences = true
 #disqusShortname = "XXX"
 #googleAnalytics = "XXX"
-publishDir = "jwinternheimer.github.io"
+publishDir = "/Users/julianwinternheimer/Documents/jwinternheimer.github.io"
 
 [Params]
   subtitle = "Dunno."

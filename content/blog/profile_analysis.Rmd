@@ -1,0 +1,62 @@
+---
+date: 2017-06-17T20:01:45-04:00
+subtitle: "Not too many."
+type: "post"
+tags: []
+title: "How many profiles do Free users use?"
+---
+
+## Motivation 
+The purpose of this analysis is to get a better understanding of how users on the Individual plan use Buffer, in order to better inform decisions around the plan limits. Specifically, we would love to learn about how many profiles Free users actually schedule updates for. 
+
+More data questions and context can be found in [**this Paper**](https://paper.dropbox.com/doc/Free-Plan-data-KJNJLDW3KtfMdZK4Z6DRS), and potential changes to the Free plan can be found in [**this Paper**](https://paper.dropbox.com/doc/Free-plan-changes-DVheYkvNs3yiE9Nhb9XRF).
+
+## Methodology
+In order to answer this question reliably with data, we would like to only consider users that are currently _active_, and analyze their updates _during the period in which they were active in Buffer_. In this case, _active_ is defined as having scheduled at least one update with Buffer in the past 28 days.
+
+To answer the question of how many profiles Free users actually use, we'll first gather all of the currently active Free users. Then, we will gather data on the number of profiles they have, and the number of updates that they have scheduled _for each profile_.
+
+Once we have this data, we will gather some summary statistics on the number of active profiles for each active user, and visualize the distribution of the number of profiles in use. It is unlikely to be normally distributed (bell shaped), so visualizing this breakdown would be useful to understanding the potential impact that changing the limits might have.
+
+## Data collection
+Let's start by getting the Free users that have scheduled at least one update in the past 28 days. We'll use the following SQL query to grab them.
+
+```{r include = FALSE}
+library(buffer); library(dplyr); library(ggplot2)
+```
+
+```{r include = FALSE}
+con <- redshift_connect()
+```
+
+```{sql connection=con, eval = FALSE}
+with user_facts as (
+  select
+    up.user_id
+    , max(up.created_at) as last_update_created_at
+  from transformed_updates as up
+  inner join users
+    on users.user_id = up.user_id
+  where up.status != 'service'
+  and users.billing_plan = 'individual'
+  group by up.user_id
+)
+select
+  user_id
+  , last_update_created_at
+from user_facts
+where last_update_created_at > (current_date - 29)
+```
+
+```{r include = F}
+# Save users
+# save(users, file = "user_profiles.Rda")
+
+# Load users data
+load("user_profiles.Rda")
+```
+
+```{r}
+head(users)
+```
+
