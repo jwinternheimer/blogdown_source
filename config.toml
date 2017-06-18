@@ -11,7 +11,7 @@ pygmentCodeFences = true
 publishDir = "/Users/julianwinternheimer/Documents/jwinternheimer.github.io"
 
 [Params]
-  subtitle = "Dunno."
+  subtitle = ""
   logo = "img/julian-avatar.png"
   favicon = "img/favicon.ico"
   dateFormat = "January 2, 2006"
