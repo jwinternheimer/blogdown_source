@@ -100,10 +100,53 @@ Now that we have the updates and profile counts for each active user, we can com
 summary(users$profile_count)
 ```
 
-Alright, here is the breakdown:
+Here is the breakdown:
 
  - Around 50% of active Free plan users scheduled updates for only 1 profile in the past 28 days.
  - The average number of profiles that active Free plan users used in the past 28 days is 1.85.
  - Around 75% of active Free plan users scheduled updates for only 2 or less profiles.
  - Someone scheduled updates for 194 profiles in the past 28 days!
  
+The maximum of 194 brings up a good point about our sample: these are only users that are _currently_ on individual plans. This means that they could have been on a paid plan in the past 28 days. I don't think it's a huge portion, or very significant for this particular analysis, but it's something to keep in mind!
+
+Let's look at the distribution.
+
+```{r include = FALSE}
+by_profile <- users %>%
+  group_by(profile_count) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(proportion = users / sum(users))
+```
+
+```{r echo = FALSE}
+options(scipen=10000)
+
+ggplot(by_profile, aes(x = as.factor(profile_count), y = users)) +
+  geom_bar(stat = 'identity') +
+  coord_cartesian(xlim = c(1,10)) +
+  labs(x = 'Number of Active Profiles', y = 'Users')
+```
+
+Wow, that's interesting! It looks like most currently active Free users have only scheduled updates to one profile in the past 28 days. Let's look at the CDF of this distribution.
+
+```{r echo = FALSE}
+ggplot(users, aes(x = profile_count)) + 
+  stat_ecdf() +
+  coord_cartesian(xlim = c(0, 10)) + 
+  scale_x_continuous(breaks = seq(0, 10, 2)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2)) +
+  labs(x = 'Number of Active Profiles', y = '' , title = 'Profile Count CDF')
+```
+
+Interesting! This graph tells us the following:
+
+ - Around 54% of users scheduled updates to 1 profile in the past 28 days.
+ - Around 76% of users scheduled updates to 2 or less profiles in the past 28 days.
+ - Around 91% of users scheduled updates to 3 or less profiles in the past 28 days.
+ 
+## Conclusions
+If we were to go with the "less limited" Free plan and only allow users to connect up to 3 profiles, the data suggests that somewhere around 10% of currently active users would be affected. This equates to around 25k users.
+
+If we were to go with the "more limited" Free plan and only allow 2 profiles, the data suggests that somewhere around 25% of currently active users would be affected! This equates to around 63k users.
+
+I think it's important to note that this is just a snapshot of _currently_ active users that are _currently_ on Individual plans, but I do think we can infer some insights from them! 
