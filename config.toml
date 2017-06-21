@@ -67,12 +67,6 @@ publishDir = "/Users/julianwinternheimer/Documents/jwinternheimer.github.io"
     weight = 2
 
 [[menu.main]]
-    parent = "samples"
-    name = "Code Sample"
-    url = "post/2016-03-08-code-sample"
-    weight = 3
-
-[[menu.main]]
     name = "Tags"
     url = "tags"
     weight = 3
