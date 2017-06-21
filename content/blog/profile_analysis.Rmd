@@ -1,20 +1,22 @@
 ---
-date: 2017-06-17T20:01:45-04:00
+date: 2017-06-21T20:01:45-04:00
 subtitle: "Not too many."
 type: "post"
 tags: []
 title: "How many profiles do Free users use?"
 ---
 
-## Motivation 
-The purpose of this analysis is to get a better understanding of how users on the Individual plan use Buffer, in order to better inform decisions around the plan limits. Specifically, we would love to learn about how many profiles Free users actually schedule updates for. 
+## Introduction
+There is a big focus on simplifying the product for Buffer users on free plans in 2017 in order to create a more intuitive experience and encourage more upgrades.  
+
+The purpose of this analysis is to get a better understanding of how users currently interact with the free plan, in order to better inform decisions around future plan limits. Specifically, we would love to learn about how many profiles users connect and actually schedule updates for. 
 
 More data questions and context can be found in [**this Paper**](https://paper.dropbox.com/doc/Free-Plan-data-KJNJLDW3KtfMdZK4Z6DRS), and potential changes to the Free plan can be found in [**this Paper**](https://paper.dropbox.com/doc/Free-plan-changes-DVheYkvNs3yiE9Nhb9XRF).
 
 ## Methodology
-In order to answer this question reliably with data, we would like to only consider users that are currently _active_, and analyze their updates _during the period in which they were active in Buffer_. In this case, _active_ is defined as having scheduled at least one update with Buffer in the past 28 days.
+To answer this question, we'd like to only consider users that are currently _active_, and analyze their usage _during the period in which they were active in Buffer_. In this case, _active_ is defined as having scheduled at least one update with Buffer in the previous 28 days.
 
-To answer the question of how many profiles Free users actually use, we'll first gather all of the currently active Free users. Then, we will gather data on the number of profiles they have, and the number of updates that they have scheduled _for each profile_.
+We'll gather all of the currently active users that are on free plans. Then, we will gather data on the number of profiles they have connected and the number of updates that they have scheduled _for each profile_.
 
 Once we have this data, we will gather some summary statistics on the number of active profiles for each active user, and visualize the distribution of the number of profiles in use. It is unlikely to be normally distributed (bell shaped), so visualizing this breakdown would be useful to understanding the potential impact that changing the limits might have.
 
@@ -56,7 +58,52 @@ where last_update_created_at > (current_date - 29)
 load("user_profiles.Rda")
 ```
 
-```{r}
-head(users)
+There are around 250 thousand users in this dataset! Now we need to get the number of updates they have scheduled, and the number of profiles that they have scheduled updates for.
+
+```{sql connection=con, eval = FALSE}
+select
+  up.user_id
+  , count(distinct up.id) as updates_count
+  , count(distinct up.profile_id) as profile_count
+from transformed_updates as up
+left join users
+  on up.user_id = users.user_id
+where users.billing_plan = 'individual'
+and up.created_at > (current_date - 29)
+group by up.user_id
 ```
 
+```{r include = F}
+# Save updates
+# save(updates, file = "user_profile_updates.Rda")
+
+# Load users data
+load("user_profile_updates.Rda")
+```
+
+Awesome! Now let's join the `updates` and `users` dataframes so that we'll have the number of updates and active profiles for each user. We'll use `dplyr`'s `left_join` function and replace `NA` values with 0.
+
+```{r}
+# Join updates and users
+users <- users %>%
+  left_join(updates, by = 'user_id')
+
+# Replace NAs with 0s
+users[is.na(users)] <- 0
+```
+
+## Exploratory analysis
+Now that we have the updates and profile counts for each active user, we can compute some quick summary statistics for our population.
+
+```{r}
+# Get summary stats on the number of profiles
+summary(users$profile_count)
+```
+
+Alright, here is the breakdown:
+
+ - Around 50% of active Free plan users scheduled updates for only 1 profile in the past 28 days.
+ - The average number of profiles that active Free plan users used in the past 28 days is 1.85.
+ - Around 75% of active Free plan users scheduled updates for only 2 or less profiles.
+ - Someone scheduled updates for 194 profiles in the past 28 days!
+ 
