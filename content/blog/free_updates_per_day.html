@@ -1,0 +1,108 @@
+---
+date: 2017-06-22T13:34:24-04:00
+subtitle: ""
+tags: []
+title: free_updates_per_day
+---
+
+
+
+<div id="introduction" class="section level2">
+<h2>Introduction</h2>
+<p>The goal of this analysis is to better understand how users use the Free plan, in order to better inform our decisions around changing its limits. In this analysis specifically, we’ll look at the number of updates that <em>active</em> users share on a daily basis.</p>
+</div>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>Let’s start by getting the Free users that have scheduled at least one update in the past 28 days. We’ll use the following SQL query to grab them.</p>
+<pre class="sql"><code>with user_facts as (
+  select
+    up.user_id
+    , users.created_at
+    , max(up.created_at) as last_update_created_at
+    , count(distinct up.id) as update_count
+    , count(distinct date(up.created_at)) as update_date_count
+  from transformed_updates as up
+  inner join users
+    on users.user_id = up.user_id
+  where up.status != &#39;service&#39;
+  and users.billing_plan = &#39;individual&#39;
+  group by up.user_id, users.created_at
+)
+select
+  user_id
+  , created_at
+  , last_update_created_at
+  , update_count
+  , update_date_count
+from user_facts
+where last_update_created_at &gt; (current_date - 29)</code></pre>
+<p>There are over 250 thousand users in this dataset!</p>
+</div>
+<div id="data-tidying" class="section level2">
+<h2>Data tidying</h2>
+<p>Each of these users has scheduled at least one update in the past 28 days with Buffer. But how should we calculate the number of updates they send per day?</p>
+<p>One approach would be to count the number of days between the date that they joined Buffer and their last update, and divide the total number of updates they’ve sent by that number.</p>
+<pre class="r"><code># Set dates as date objects
+users$created_at &lt;- as.Date(users$created_at)
+users$last_update_created_at &lt;- as.Date(users$last_update_created_at)
+
+# Count days between join and last update date
+users &lt;- users %&gt;%
+  mutate(days_since_join = as.numeric(last_update_created_at - created_at) + 1) %&gt;%
+  mutate(updates_per_day = update_count / days_since_join)</code></pre>
+<p>Alright, now we’re ready for some summary statistics on this number.</p>
+</div>
+<div id="exploratory-analysis" class="section level2">
+<h2>Exploratory analysis</h2>
+<p>Let’s compute the summary statistics for the <code>updates_per_day</code> dimension we just created.</p>
+<pre class="r"><code># Summarise updates per day
+summary(users$updates_per_day)</code></pre>
+<pre><code>##      Min.   1st Qu.    Median      Mean   3rd Qu.      Max.      NA&#39;s 
+##     0.000     0.333     0.941     2.297     2.000 11524.833        14</code></pre>
+<p>Here is the breakdown:</p>
+<ul>
+<li>Around 25% of active users have sent 0.33 updates per day or less.</li>
+<li>Around 50% of active users have sent 0.94 updates per day or less.</li>
+<li>Around 75% of active users have sent 2.00 updates per day or less.</li>
+</ul>
+<p>I have a hunch that this isn’t normally distributed, so let’s visualize the distribution of <code>updates_per_day</code>.</p>
+<pre><code>## Warning: Removed 6158 rows containing non-finite values (stat_density).</code></pre>
+<p><img src="/blog/free_updates_per_day_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>This distribution shape is something that we would expect. The vast majority of users send very few updates per day, while a small number of users send many updates per day.</p>
+<p>We can also “bucket” users by their value of <code>updates_per_day</code> to get the discrete user counts.</p>
+<p><img src="/blog/free_updates_per_day_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>As we can see, most of the Free user population is scheduling less than one update per day <em>on average</em>.</p>
+<p>Although we see that over 50% of free users scheduled less than one update per day <em>on average</em>, I would suspect that their updates aren’t necessarily evenly distributed across the time that they’ve been active with Buffer.</p>
+<p>For example, a user might be more active one week than the next, and might be completely inactive for the next two weeks. Even though the user might have a very low <code>updates_per_day</code> value, they may schedule much more than one update per day on days and weeks in which they are active.</p>
+<p>It feels like this is an important consideration when we think about rates. One alternative approach would be to look at the number of updates per day <em>only for days in which users are active</em>.</p>
+</div>
+<div id="updates-per-active-day" class="section level2">
+<h2>Updates per active day</h2>
+<p>Let’s take the same approach we did for <code>updates_per_day</code>, except this time count the total number of updates by the total number of days in which users scheduld updates. :)</p>
+<pre class="r"><code># Calculate new updates per day
+users &lt;- users %&gt;%
+  mutate(updates_per_active_day = update_count / update_date_count)</code></pre>
+<p>Now we can summarise this <code>updates_per_active_day</code> variable.</p>
+<pre class="r"><code># Summarize updates per active day
+summary(users$updates_per_active_day)</code></pre>
+<pre><code>##      Min.   1st Qu.    Median      Mean   3rd Qu.      Max. 
+##     1.000     2.000     3.379     5.488     5.726 11608.956</code></pre>
+<p>Hers’s how it breaks down:</p>
+<ul>
+<li>Around 25% of active users have sent 2.00 updates per day or less.</li>
+<li>Around 50% of active users have sent 3.38 updates per day or less.</li>
+<li>Around 75% of active users have sent 5.73 updates per day or less.</li>
+</ul>
+<p>We can see that these values are quite different than our summary statistics for <code>updates_per_day</code>. Let’s visualize this distribution for active users.</p>
+<pre><code>## Warning: Removed 22160 rows containing non-finite values (stat_density).</code></pre>
+<p><img src="/blog/free_updates_per_day_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>Quite a different shape. :) And we can “bucket” users in the same way we did last time as well.</p>
+<p><img src="/blog/free_updates_per_day_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
+<p>Here we can see a distribution that is quite different than what we saw before.</p>
+</div>
+<div id="conclusions" class="section level2">
+<h2>Conclusions</h2>
+<p>Depending on how we measure <em>updates per day</em>, we see different distributions for currently active free users. Generally, most users schedule less than 5 updates per day, however it is still possible for users to be more active in certain time periods compared to others.</p>
+<p>Limiting the number of updates users can schedule per day to 5 has the potential to affect over 25% of the user base, since more than 25% schedule over 5 updates per <em>active</em> day (days in which updates are scheduled).</p>
+<p>Thanks for reading! Let me know if you have any thoughts, questions, or feedback at all! :)</p>
+</div>
