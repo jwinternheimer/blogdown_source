@@ -1,6 +1,7 @@
 ---
 date: 2017-06-21T20:01:45-04:00
 subtitle: "Not too many."
+bigimg: [{src: "/blog/profile_analysis_files/figure-html/unnamed-chunk-10-1.png"}]
 type: "post"
 tags: []
 title: "How many profiles do Free users use?"
@@ -31,7 +32,7 @@ library(buffer); library(dplyr); library(ggplot2)
 con <- redshift_connect()
 ```
 
-```{sql connection=con, eval = FALSE}
+```{sql connection=con, eval=FALSE}
 with user_facts as (
   select
     up.user_id
@@ -60,7 +61,7 @@ load("user_profiles.Rda")
 
 There are around 250 thousand users in this dataset! Now we need to get the number of updates they have scheduled, and the number of profiles that they have scheduled updates for.
 
-```{sql connection=con, eval = FALSE}
+```{sql connection=con, eval=FALSE}
 select
   up.user_id
   , count(distinct up.id) as updates_count
@@ -69,6 +70,7 @@ from transformed_updates as up
 left join users
   on up.user_id = users.user_id
 where users.billing_plan = 'individual'
+and up.status != 'service'
 and up.created_at > (current_date - 29)
 group by up.user_id
 ```
@@ -103,7 +105,7 @@ summary(users$profile_count)
 Here is the breakdown:
 
  - Around 50% of active Free plan users scheduled updates for only 1 profile in the past 28 days.
- - The average number of profiles that active Free plan users used in the past 28 days is 1.85.
+ - The average number of profiles that active Free plan users used in the past 28 days is 1.88.
  - Around 75% of active Free plan users scheduled updates for only 2 or less profiles.
  - Someone scheduled updates for 194 profiles in the past 28 days!
  
@@ -124,6 +126,7 @@ options(scipen=10000)
 ggplot(by_profile, aes(x = as.factor(profile_count), y = users)) +
   geom_bar(stat = 'identity') +
   coord_cartesian(xlim = c(1,10)) +
+  geom_text(aes(label = users), position = position_dodge(width=0.9), vjust=-0.25) +
   labs(x = 'Number of Active Profiles', y = 'Users')
 ```
 
@@ -140,9 +143,10 @@ ggplot(users, aes(x = profile_count)) +
 
 Interesting! This graph tells us the following:
 
- - Around 54% of users scheduled updates to 1 profile in the past 28 days.
+ - Around 56% of users scheduled updates to 1 profile in the past 28 days.
  - Around 76% of users scheduled updates to 2 or less profiles in the past 28 days.
  - Around 91% of users scheduled updates to 3 or less profiles in the past 28 days.
+ - Around 98% of users scheduled updates to 4 or less profiles in the past 28 days.
  
 ## Conclusions
 If we were to go with the "less limited" Free plan and only allow users to connect up to 3 profiles, the data suggests that somewhere around 10% of currently active users would be affected. This equates to around 25k users.
