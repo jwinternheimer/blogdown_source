@@ -1,8 +1,10 @@
 ---
 date: 2017-06-22T13:34:24-04:00
 subtitle: ""
+type: "post"
+bigimg: [{src: "/blog/free_updates_per_day_files/figure-html/unnamed-chunk-12-1.png"}]
 tags: []
-title: free_updates_per_day
+title: "How many updates do Free users schedule per day?"
 ---
 
 ## Introduction
