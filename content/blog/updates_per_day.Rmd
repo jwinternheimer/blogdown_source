@@ -1,0 +1,186 @@
+---
+date: 2017-06-22T11:51:15-04:00
+subtitle: ""
+tags: []
+title: "Free Plan: Updates Per Day"
+---
+
+## Introduction
+The goal of this analysis is to better understand how users use the Free plan, in order to better inform our decisions around changing its limits. In this analysis specifically, we'll look at the number of updates that _active_ users share on a daily basis.
+
+## Data collection
+Let's start by getting the Free users that have scheduled at least one update in the past 28 days. We'll use the following SQL query to grab them.
+
+```{r include = FALSE}
+library(buffer); library(dplyr); library(ggplot2)
+```
+
+```{r include = FALSE}
+con <- redshift_connect()
+```
+
+```{sql connection=con, eval = FALSE}
+with user_facts as (
+  select
+    up.user_id
+    , users.created_at
+    , max(up.created_at) as last_update_created_at
+    , count(distinct up.id) as update_count
+    , count(distinct date(up.created_at)) as update_date_count
+  from transformed_updates as up
+  inner join users
+    on users.user_id = up.user_id
+  where up.status != 'service'
+  and users.billing_plan = 'individual'
+  group by up.user_id, users.created_at
+)
+select
+  user_id
+  , created_at
+  , last_update_created_at
+  , update_count
+  , update_date_count
+from user_facts
+where last_update_created_at > (current_date - 29)
+```
+
+```{r include = F}
+# Save users
+# save(users, file = "active_users.Rda")
+
+# Load users data
+load("active_users.Rda")
+```
+
+There are over 250 thousand users in this dataset! 
+
+## Data tidying
+Each of these users has scheduled at least one update in the past 28 days with Buffer. But how should we calculate the number of updates they send per day?
+
+One approach would be to count the number of days between the date that they joined Buffer and their last update, and divide the total number of updates they've sent by that number.
+
+```{r}
+# Set dates as date objects
+users$created_at <- as.Date(users$created_at)
+users$last_update_created_at <- as.Date(users$last_update_created_at)
+
+# Count days between join and last update date
+users <- users %>%
+  mutate(days_since_join = as.numeric(last_update_created_at - created_at) + 1) %>%
+  mutate(updates_per_day = update_count / days_since_join)
+```
+
+Alright, now we're ready for some summary statistics on this number.
+
+## Exploratory analysis
+Let's compute the summary statistics for the `updates_per_day` dimension we just created.
+
+```{r}
+# Summarise updates per day
+summary(users$updates_per_day)
+```
+
+Here is the breakdown:
+
+ - Around 25% of active users have sent 0.33 updates per day or less.
+ - Around 50% of active users have sent 0.94 updates per day or less.
+ - Around 75% of active users have sent 2.00 updates per day or less.
+ 
+I have a hunch that this isn't normally distributed, so let's visualize the distribution of `updates_per_day`.
+
+```{r echo = FALSE}
+# Plot distribution
+ggplot(users, aes(x = updates_per_day)) + 
+  geom_density(fill = 'black', alpha = 0.5) +
+  scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, 2)) +
+  labs(x = 'Updates Per Day', y = 'Density', title = 'Distribution of Updates Per Day')
+```
+
+This distribution shape is something that we would expect. The vast majority of users send very few updates per day, while a small number of users send many updates per day. 
+
+We can also "bucket" users by their value of `updates_per_day` to get the discrete user counts.
+
+```{r include = FALSE}
+by_update <- users %>%
+  mutate(updates_rounded = round(updates_per_day, 0)) %>%
+  group_by(updates_rounded) %>%
+  summarise(users = n_distinct(user_id))
+```
+
+```{r echo = F}
+options(scipen=10000)
+
+ggplot(by_update, aes(x = as.factor(updates_rounded), y = users)) +
+  geom_bar(stat = 'identity') +
+  coord_cartesian(xlim = c(1,10)) +
+  geom_text(aes(label = users), position = position_dodge(width=0.9), vjust=-0.25) +
+  labs(x = 'Updates Per Day', y = 'Users')
+```
+
+As we can see, most of the Free user population is scheduling less than one update per day _on average_. 
+
+Although we see that over 50% of free users scheduled less than one update per day _on average_, I would suspect that their updates aren't necessarily evenly distributed across the time that they've been active with Buffer.
+
+For example, a user might be more active one week than the next, and might be completely inactive for the next two weeks. Even though the user might have a very low `updates_per_day` value, they may schedule much more than one update per day on days and weeks in which they are active. 
+
+It feels like this is an important consideration when we think about rates. One alternative approach would be to look at the number of updates per day _only for days in which users are active_.
+
+## Updates per active day
+Let's take the same approach we did for `updates_per_day`, except this time count the total number of updates by the total number of days in which users scheduld updates. :)
+
+```{r}
+# Calculate new updates per day
+users <- users %>%
+  mutate(updates_per_active_day = update_count / update_date_count)
+```
+
+Now we can summarise this `updates_per_active_day` variable.
+
+```{r}
+# Summarize updates per active day
+summary(users$updates_per_active_day)
+```
+
+Hers's how it breaks down: 
+
+ - Around 25% of active users have sent 2.00 updates per day or less.
+ - Around 50% of active users have sent 3.38 updates per day or less.
+ - Around 75% of active users have sent 5.73 updates per day or less.
+ 
+We can see that these values are quite different than our summary statistics for `updates_per_day`. Let's visualize this distribution for active users.
+
+```{r echo = FALSE}
+# Plot distribution
+ggplot(users, aes(x = updates_per_active_day)) + 
+  geom_density(fill = 'black', alpha = 0.5) +
+  scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, 2)) +
+  labs(x = 'Updates Per Active Day', y = 'Density', title = 'Distribution of Updates Per Active Day')
+```
+ 
+Quite a different shape. :) And we can "bucket" users in the same way we did last time as well. 
+
+```{r include = FALSE}
+by_update <- users %>%
+  mutate(active_updates_rounded = round(updates_per_active_day, 0)) %>%
+  group_by(active_updates_rounded) %>%
+  summarise(users = n_distinct(user_id))
+```
+
+```{r echo = F}
+options(scipen=10000)
+
+ggplot(by_update, aes(x = as.factor(active_updates_rounded), y = users)) +
+  geom_bar(stat = 'identity') +
+  coord_cartesian(xlim = c(1,15)) +
+  geom_text(aes(label = users), position = position_dodge(width=0.9), vjust=-0.25) +
+  labs(x = 'Updates Per Active Day', y = 'Users')
+```
+
+Here we can see a distribution that is quite different than what we saw before. 
+
+## Conclusions
+Depending on how we measure _updates per day_, we see different distributions for currently active free users. Generally, most users schedule less than 5 updates per day, however it is still possible for users to be more active in certain time periods compared to others. 
+
+Limiting the number of updates users can schedule per day to 5 has the potential to affect over 25% of the user base, since more than 25% schedule over 5 updates per _active_ day (days in which updates are scheduled).
+
+Thanks for reading! Let me know if you have any thoughts, questions, or feedback at all! :)
