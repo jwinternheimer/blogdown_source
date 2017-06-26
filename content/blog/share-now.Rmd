@@ -1,0 +1,349 @@
+---
+date: 2017-06-26T10:25:44-04:00
+subtitle: ""
+type: "post"
+tags: []
+title: "How often do free users 'Share Now'?"
+---
+
+## Introduction
+As part of the next product cycle, we will try to create a simpler, more streamlined experience for Buffer users on a free plan. Part of that simplification process could include the limiting or removal of the option to 'Share Now', when drafting updates. 
+
+Sharing an update immediately doesn't add a post to the queue, which could possibly allow for the sending of many updates in a single time period. The purpose of this analysis will be to determine the number (and percentage) of _currently active_ Free users that utilize this feature, and how often they do so.
+
+## Methodology
+In order to effectively answer these questions, we'll need to collect a lot of data. We need to identify all currently active free users, and then collect their update counts for certain time periods. In the latter part of this anlaysis, we'll grab a sample of these users and collect the number of updates sent (and updates shared now) for _each week_. 
+
+After the data is collected, we'll compute some summary statistics, like the average percentage of updates that are shared immediately, the percentage of users that have 'Shared Now', and summary statistics related to the frequency with which users share updates immediately.
+
+## Conclusions
+Of the _currently active_ free users, around 30% have used the Share Now feature. This equates to over 70 thousand users.
+
+The data suggests that most of the updates that are shared immediately are shared through the dashboard or MC composer, which makes complete sense. However, selecting the 'Share Now' option for updates already in the Queue is also a very popular option that is used quite often.
+
+Most users don't use Share Now frequently. Around 69% of users in our dataset simply haven't used the feature in the past month, and 0% of their active weeks included updates that were shared immediately. 
+
+However, **_there is a long tail of users that do use the feature use it quite frequently_**. Considering that only around 30% of active users used the Share Now feature, the fact that around 19% used in at least 50% of active weeks and 15% used it in _every_ week active is interesting. It seems to be quite a sticky feature for those that use it.
+
+If we were to remove this feature, I suspect that it would have a significant impact on users' workflows. This claim is based on the apparent stickiness of the feature for those users that utilize it, and the percentage of active users that have used it in the past month. Without an alternative solution, I might suspect a high volume of questions and pushback from our users.
+
+## Data collection
+Let's start by getting the Free users that have scheduled at least one update in the past 28 days (the criteria to be considered _active_). We'll use the following SQL query to grab them.
+
+```{r include = FALSE}
+library(buffer); library(dplyr); library(ggplot2)
+```
+
+```{r include = FALSE}
+con <- redshift_connect()
+```
+
+```{sql connection=con, eval=FALSE}
+with user_facts as (
+  select
+    up.user_id
+    , users.created_at
+    , max(up.created_at) as last_update_created_at
+    , count(distinct up.id) as update_count
+  from transformed_updates as up
+  inner join users
+    on users.user_id = up.user_id
+  where up.status != 'service'
+  and users.billing_plan = 'individual'
+  group by up.user_id, users.created_at
+)
+select
+  user_id
+  , created_at
+  , last_update_created_at
+  , update_count
+from user_facts
+where last_update_created_at > (current_date - 29)
+```
+
+```{r include = F}
+# Save users
+# save(users, file = "users_shared_now.Rda")
+
+# Load users data
+load("/Users/julianwinternheimer/Documents/blogdown_source/users_shared_now.Rda")
+```
+
+Great, we have around 250K users in this dataset, as well as the number of updates that each has sent in the previous 28 days. Now we need to get a count of how many updates that they each have 'Shared Now'. 
+
+Unfortunately we're not quite able to determine which updates were shared immediately from the data in the `updates` table, but we can use data from `actions_taken` to get there.
+
+```{sql connection=con, eval = FALSE}
+select
+  a.user_id
+  , a.full_scope
+  , count(distinct a.id) as shared_now_count
+from actions_taken as a
+inner join users
+  on users.user_id = a.user_id
+where users.billing_plan = 'individual'
+and date(a.date) > (current_date - 29)
+and (a.full_scope like '%shared_now%'
+  or a.full_scope like '%shared now%'
+  or a.full_scope like '%shared composer now%')
+group by a.user_id, a.full_scope
+```
+
+```{r include = F}
+# Save users
+# save(shared_now, file = "shared_now_actions.Rda")
+
+# Load users data
+load("shared_now_actions.Rda")
+```
+
+Great.
+
+## Data tidying
+Now that we have collected the data needed to answer the first question, let's do some tidying to get it ready for analysis. First, let's join the `shared_now` data from `actions_taken` into our `users` dataframe.
+
+First, we have to recognize that there are different `full_scope` values for the different options that are present for sharing a post immediately. For example, one `full_scope` might refer to selecting 'Share Now' directly from the composer in the dashboard, while another `full_scope` might refer to selecting 'Share Now' from the Queue for an update that had already been scheduled. We're happy with the total number of updates shared immediately for now, so let's just take the total sum for each user.
+
+```{r}
+# Sum updates shared now per user
+by_user <- shared_now %>%
+  group_by(user_id) %>%
+  summarise(updates_shared_now = sum(shared_now_count))
+```
+
+```{r}
+# Join users and shared_now
+users_updates <- users %>%
+  left_join(by_user, by = 'user_id')
+```
+
+Great, now we just need to replace those NA values with 0.
+
+```{r}
+# Replace NA with 0
+users_updates$updates_shared_now[is.na(users_updates$updates_shared_now)] <- 0
+```
+
+Alright, now we're ready to answer a couple questions.
+
+## How many free users use 'Share Now'?
+The first question we can try to answer is "how many Free users utilize the 'Share Now' feature?" This can be done with a simple `group_by()`.
+
+```{r}
+# Count users and percentage that share now
+users_updates %>%
+  group_by(updates_shared_now > 0) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users))
+```
+
+Cool. The data we've collected suggests that **_around 30% of active Free users have used the 'Share Now' feature in the past 28 days._**
+
+We can go a step further and ask about the proportion of their updates that are shared immediately. Let's do a bit of transformation so that we can answer this question propoerly.
+
+```{r}
+# Calculate proportion of updates shared now
+users_updates <- users_updates %>%
+  mutate(percent_shared_now = updates_shared_now / update_count)
+```
+
+Let's summarise this statistic `percent_shared_now`.
+
+```{r}
+summary(users_updates$percent_shared_now)
+```
+
+Wow, it looks like the percentage of updates is usually very small for users.
+
+ - An average of 3.8% of users udpates are shared immediately, while the median is 0.0%.
+ - Around 75% of active users have an average of 0.2%, or less, of their updates that are shared immediately.
+ 
+Let's visualize this distribution with a CDF.
+
+```{r echo = FALSE}
+ggplot(users_updates, aes(x = percent_shared_now)) +
+  stat_ecdf() +
+  coord_cartesian(xlim = c(0, 0.15)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2)) +
+  labs(x = 'Percent of Updates Shared Now', y = '', title = 'Percent Shared Now CDF')
+```
+
+Based on this graph, around 70% of active users have not shared now. We knew this from the earlier part of this anlaysis. Around 90% of users have 5% of less of thier updates shared now, and around 93% of users have 10% or less of their updates shared now. 
+
+There is a very long tail here, which **_suggests that there is a smaller group of users with a high percent of updates that are shared now_**. Let's try to identify these users.
+
+## Who are the 'heavy users'?
+We'll call them _heavy users_, and set the threshold at 15% or more of updates being shared immediately.
+
+```{r}
+# Identify heavy users
+users_updates <- users_updates %>%
+  mutate(heavy_user = (percent_shared_now >= 0.15))
+```
+
+Now let's compute some summary stats for them.
+
+```{r}
+users_updates %>%
+  group_by(heavy_user) %>%
+  summarise(users = n_distinct(user_id),
+            med_updates = median(update_count),
+            med_shared_now = median(updates_shared_now)) %>%
+  mutate(percent = users / sum(users))
+```
+
+Alright! That's interesting. _Heavy users_ only make up around 6% of the population, but that equates to around 15k users! One very important difference is that _heavy users_ tend to not to have very many updates. The median update count for _heavy users_ is 6, compared to 136 for the rest of the population.
+
+Let's visualize the distribution of update counts for both groups.
+
+```{r echo = FALSE}
+# Create density plots
+ggplot(users_updates, aes(x = update_count, color = heavy_user)) +
+  geom_density() +
+  scale_x_continuous(limits = c(0, 200), breaks = seq(0, 200, 50)) +
+  labs(x = 'Updates', y = 'Density', color = 'Heavy User')
+```
+
+As we can see here, _heavy users_ have a much higher update count density in the left hand side, near 0 updates. This makes sense -- they only need to share a few updates immediately to have a high percentage of their total updates shared now. 
+
+## What are the different types of 'Share Now'?
+As mentioned earlier, there are different ways for users to share an update immediately. Let's quickly see what these options are and how they break down for users.
+
+```{r}
+shared_now %>%
+  group_by(full_scope) %>%
+  summarise(users = n_distinct(user_id),
+            updates = sum(shared_now_count)) %>%
+  mutate(user_percent = users / sum(users) * 100,
+         update_percent = updates / sum(updates) * 100) %>%
+  arrange(desc(user_percent))
+```
+
+This is interesting. Around 45% of 'Share Now' updates are shared through the dashboard composer. Aroud 43% of active Free users (that shared at least one update immediately) did this.
+
+ - Around 33% of 'Share Now' updates were shared through the extension's multiple composer. Only around 21% of Free users did this.
+ - Around 30% of users took an update that had been in the Queue and selected 'Share Now' from there. This made up around 18% of all share now updates.
+ - The rest of the options (rebufferring, sharing now from calendar, sharing now to groups, etc. made up relatively small percentages.)
+ 
+Based on these summary stats, I'd say that **_the data suggests that sharing now from the composer window is the most popular way to 'Share Now', but many users and updates are shared now through the Queue as well_**.
+
+## How frequently do users 'Share Now'?
+In order to answer this question, we'll need to collect more data. In the query below, we count the total number of updates users share now during each week that they 'Share Now'. :) 
+
+```{r include = FALSE}
+con <- redshift_connect()
+```
+
+```{sql connection=con, eval = FALSE}
+select
+  a.user_id 
+  , date_trunc('week', a.date) as week
+  , count(distinct a.id) as shared_now_count
+from actions_taken as a
+inner join users
+  on users.user_id = a.user_id
+where users.billing_plan = 'individual'
+and date(a.date) > (current_date - 60)
+and (a.full_scope like '%shared_now%'
+  or a.full_scope like '%shared now%'
+  or a.full_scope like '%shared composer now%')
+group by a.user_id, week
+```
+
+```{r include = F}
+# Save updates
+# save(updates_per_week, file = "updates_shared_now_per_week.Rda")
+
+# Load users data
+load("updates_shared_now_per_week.Rda")
+```
+
+This doesn't quite get us the complete picture however. We want to know the weeks in which there were _no_ 'Share Now' updates as well. In order to get that, we need to join some data from the `users` dataframe.
+
+But first, let's summarise the number of distinct weeks that these users have shared now updates.
+
+```{r}
+updates_by_user <- updates_per_week %>%
+  group_by(user_id) %>%
+  summarise(share_now_weeks = n_distinct(week),
+            updates_shared_now = sum(shared_now_count))
+```
+
+
+```{r}
+# Join in users data
+users_updates_per_week <- users %>%
+  left_join(updates_by_user, by = 'user_id')
+```
+
+Now let's replace the NAs with 0s.
+
+```{r}
+users_updates_per_week$share_now_weeks[is.na(users_updates_per_week$share_now_weeks)] <- 0
+users_updates_per_week$updates_shared_now[is.na(users_updates_per_week$updates_shared_now)] <- 0
+```
+
+Great, now we need to calculate the number of weeks that have elapsed between them joining and their last update.
+
+```{r}
+# Set dates as date objects
+users_updates_per_week$created_at <- as.Date(users_updates_per_week$created_at)
+users_updates_per_week$last_update_created_at <- as.Date(users_updates_per_week$last_update_created_at)
+
+# Calculate the number of days that have elapsed
+users_updates_per_week <- users_updates_per_week %>%
+  mutate(days_between_join_and_last_update = as.numeric(last_update_created_at - created_at)) %>%
+  mutate(weeks_since_joining = ceiling(days_between_join_and_last_update / 7))
+```
+
+Because we only have update counts for updates created in the past 60 days, we need to limit this dataset to users created in the past 60 days to get accurrate statistics.
+
+```{r}
+# Filter out users created before 60 days ago
+recent_users <- users_updates_per_week %>%
+  filter(created_at >= (Sys.Date() - 60))
+```
+
+Now let's create a new measure `percent_of_weeks` that is the number of distinct weeks with an update that was shared now, divided by the weeks between joining and the last update date. 
+
+```{r}
+# Calculate percent of weeks with updates shared immediately
+recent_users <- recent_users %>%
+  mutate(percent_of_weeks = share_now_weeks / ceiling(weeks_since_joining))
+```
+
+Cool, now let's visualize this distribution!
+
+```{r echo = FALSE}
+ggplot(recent_users, aes(x = percent_of_weeks)) +
+  geom_density() +
+  scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) + 
+  labs(x = 'Percent of Weeks with an Update Shared Now', y = 'Density')
+```
+
+
+```{r echo = FALSE}
+ggplot(recent_users, aes(x = percent_of_weeks)) +
+  stat_ecdf() +
+  coord_cartesian(xlim = c(0, 1)) +
+  scale_x_continuous(breaks = seq(0, 1, 0.2)) + 
+  scale_y_continuous(breaks = seq(0, 1, 0.2)) +
+  labs(x = 'Percent of Weeks with an Update Shared Now', y = '', title = 'CDF')
+```
+
+These graphs indicate that most users don't Share Now frequently. Around 69% of users in our dataset simply haven't used the feature in the past month, so 0% of their weeks contain updates shared immediately. 
+
+However, **_there is a very long tail that suggests that peopel that do use the feature use it quite frequently_**.
+
+Considering that only around 30% of active users used the Share Now feature, the fact that around 19% used in at least 50% of active weeks and 15% used it in _every_ week active is interesting. It seems to be quite a sticky feature for those that use it.
+
+## Conclusions
+Of the _currently active_ free users, around 30% have used the Share Now feature. This equates to over 70 thousand users! 
+
+The data suggests that most of the updates that are shared immediately are shared through the dashboard or MC composer, which makes complete sense. However, selecting the 'Share Now' option for updates already in the Queue is also a very popular option that is used quite often.
+
+Most users don't use Share Now frequently. Around 69% of users in our dataset simply haven't used the feature in the past month, so 0% of their weeks contain updates shared immediately. 
+
+However, **_there is a very long tail that suggests that peopel that do use the feature use it quite frequently_**. Considering that only around 30% of active users used the Share Now feature, the fact that around 19% used in at least 50% of active weeks and 15% used it in _every_ week active is interesting. It seems to be quite a sticky feature for those that use it.
+
+If we were to remove this feature, I suspect that it would have a significant impact on users' workflows. This claim is based on the apparent stickiness of the feature for those users that utilize it, and the percentage of active users that have used it in the past month. Without an alternative solution, I might suspect a high volume of questions and pushback from our users.
