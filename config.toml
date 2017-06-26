@@ -1,7 +1,7 @@
 baseurl = "https://jwinternheimer.github.io"
 DefaultContentLanguage = "en"
 #DefaultContentLanguage = "ja"
-title = "Is That Your Analysis?"
+title = "Data Analysis?"
 theme = "beautifulhugo"
 metaDataFormat = "yaml"
 pygmentsUseClasses = true
