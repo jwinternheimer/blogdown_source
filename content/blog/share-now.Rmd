@@ -27,6 +27,8 @@ However, **_there is a long tail of users that do use the feature use it quite f
 
 If we were to remove this feature, I suspect that it would have a significant impact on users' workflows. This claim is based on the apparent stickiness of the feature for those users that utilize it, and the percentage of active users that have used it in the past month. Without an alternative solution, I might suspect a high volume of questions and pushback from our users.
 
+**There is no way to know definitively though**. In order to get a better estimate of how people will react (e.g. how many people would leave Buffer, how many would upgrade), we might want to run an experiment. If we removed the ability to Share Next for a subset of, say, 5-10% of currently active Free users, we would be able to better understand the causal relationships that are occurring.
+
 ## Data collection
 Let's start by getting the Free users that have scheduled at least one update in the past 28 days (the criteria to be considered _active_). We'll use the following SQL query to grab them.
 
@@ -333,17 +335,19 @@ ggplot(recent_users, aes(x = percent_of_weeks)) +
 
 These graphs indicate that most users don't Share Now frequently. Around 69% of users in our dataset simply haven't used the feature in the past month, so 0% of their weeks contain updates shared immediately. 
 
-However, **_there is a very long tail that suggests that peopel that do use the feature use it quite frequently_**.
+However, **_there is a long tail of users that do use the feature use it quite frequently_**.
 
 Considering that only around 30% of active users used the Share Now feature, the fact that around 19% used in at least 50% of active weeks and 15% used it in _every_ week active is interesting. It seems to be quite a sticky feature for those that use it.
 
 ## Conclusions
-Of the _currently active_ free users, around 30% have used the Share Now feature. This equates to over 70 thousand users! 
+Of the _currently active_ free users, around 30% have used the Share Now feature. This equates to over 70 thousand users.
 
 The data suggests that most of the updates that are shared immediately are shared through the dashboard or MC composer, which makes complete sense. However, selecting the 'Share Now' option for updates already in the Queue is also a very popular option that is used quite often.
 
-Most users don't use Share Now frequently. Around 69% of users in our dataset simply haven't used the feature in the past month, so 0% of their weeks contain updates shared immediately. 
+Most users don't use Share Now frequently. Around 69% of users in our dataset simply haven't used the feature in the past month, and 0% of their active weeks included updates that were shared immediately. 
 
-However, **_there is a very long tail that suggests that peopel that do use the feature use it quite frequently_**. Considering that only around 30% of active users used the Share Now feature, the fact that around 19% used in at least 50% of active weeks and 15% used it in _every_ week active is interesting. It seems to be quite a sticky feature for those that use it.
+However, **_there is a long tail of users that do use the feature use it quite frequently_**. Considering that only around 30% of active users used the Share Now feature, the fact that around 19% used in at least 50% of active weeks and 15% used it in _every_ week active is interesting. It seems to be quite a sticky feature for those that use it.
 
 If we were to remove this feature, I suspect that it would have a significant impact on users' workflows. This claim is based on the apparent stickiness of the feature for those users that utilize it, and the percentage of active users that have used it in the past month. Without an alternative solution, I might suspect a high volume of questions and pushback from our users.
+
+**There is no way to know definitively though**. In order to get a better estimate of how people will react (e.g. how many people would leave Buffer, how many would upgrade), we might want to run an experiment. If we removed the ability to Share Next for a subset of, say, 5-10% of currently active Free users, we would be able to better understand the causal relationships that are occurring.

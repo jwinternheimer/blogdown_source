@@ -70,15 +70,19 @@ summary(users$profile_count)</code></pre>
 <p>Here is the breakdown:</p>
 <ul>
 <li>Around 50% of active Free plan users scheduled updates for only 1 profile in the past 28 days.</li>
-<li>The average number of profiles that active Free plan users used in the past 28 days is 1.88.</li>
+<li>The average number of profiles that active Free plan users used in the past 28 days is around 1.9.</li>
 <li>Around 75% of active Free plan users scheduled updates for only 2 or less profiles.</li>
 <li>Someone scheduled updates for 194 profiles in the past 28 days!</li>
 </ul>
-<p>The maximum of 194 brings up a good point about our sample: these are only users that are <em>currently</em> on individual plans. This means that they could have been on a paid plan in the past 28 days. I don’t think it’s a huge portion, or very significant for this particular analysis, but it’s something to keep in mind!</p>
-<p>Let’s look at the distribution.</p>
+<p>The maximum of 194 brings up a good point about our sample: these are only users that are <em>currently</em> on individual plans. This means that they could have been on a paid plan in the past 28 days. I don’t think it’s a huge portion, or very significant for this particular analysis, but it is something to keep in mind.</p>
+<p>Let’s look at the distribution of profiles for active free users.</p>
 <p><img src="/blog/profile_analysis_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
-<p>Wow, that’s interesting! It looks like most currently active Free users have only scheduled updates to one profile in the past 28 days. Let’s look at the CDF of this distribution.</p>
+<p>Wow, that’s interesting! It looks like most currently active Free users have only scheduled updates to one profile in the past 28 days.</p>
+<p>One possibility is that there are very new users that have only gotten the chance to schedule updates to one or two profiles. Let’s see what would happen if we only looked at users that have sent at least 5 updates in the past 28 days.</p>
 <p><img src="/blog/profile_analysis_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+<p>We can see here that the proportion of active users that only schedule to a single profile changes quite a bit, but it is still high at 46.5%.</p>
+<p>Let’s look at the CDF of the profiles distribution.</p>
+<p><img src="/blog/profile_analysis_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
 <p>Interesting! This graph tells us the following:</p>
 <ul>
 <li>Around 56% of users scheduled updates to 1 profile in the past 28 days.</li>
@@ -91,5 +95,7 @@ summary(users$profile_count)</code></pre>
 <h2>Conclusions</h2>
 <p>If we were to go with the “less limited” Free plan and only allow users to connect up to 3 profiles, the data suggests that somewhere around 10% of currently active users would be affected. This equates to around 25k users.</p>
 <p>If we were to go with the “more limited” Free plan and only allow 2 profiles, the data suggests that somewhere around 25% of currently active users would be affected! This equates to around 63k users.</p>
-<p>I think it’s important to note that this is just a snapshot of <em>currently</em> active users that are <em>currently</em> on Individual plans, but I do think we can infer some insights from them!</p>
+<p>I think it’s important to note that this is just a snapshot of <em>currently</em> active users that are <em>currently</em> on Individual plans.</p>
+<p>There are still important things that we <strong>don’t</strong> know as of yet. We don’t know how these users with 3 or more profiles will repond if we change the limits, even if they don’t actively use all of their profiles. We can assume that a certain amount will updgrade, but a certain amount will also leave Buffer. We also don’t quite know what effect word-of-mouth will have. We also may make the assumption that people with only 1 or 2 profiles will be unaffected – this may not necessarily be the case. We don’t fully understand the underlying causal effects that the profile limits have.</p>
+<p>One way to get a better understanding of those causal mechanisms would be to run an experiment. If we could adjust the profile limits of a subset of our active Free user population, and allow them to upgrade to increase their limits, we would be able to make a better estimate of how this change might affect our user base and revenue stream. I would suggest running an experiment on a small subset of our active Free user population before making any definitive statement on the effect it will have on revenue.</p>
 </div>

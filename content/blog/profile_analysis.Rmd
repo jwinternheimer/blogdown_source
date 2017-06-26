@@ -105,13 +105,13 @@ summary(users$profile_count)
 Here is the breakdown:
 
  - Around 50% of active Free plan users scheduled updates for only 1 profile in the past 28 days.
- - The average number of profiles that active Free plan users used in the past 28 days is 1.88.
+ - The average number of profiles that active Free plan users used in the past 28 days is around 1.9.
  - Around 75% of active Free plan users scheduled updates for only 2 or less profiles.
  - Someone scheduled updates for 194 profiles in the past 28 days!
  
-The maximum of 194 brings up a good point about our sample: these are only users that are _currently_ on individual plans. This means that they could have been on a paid plan in the past 28 days. I don't think it's a huge portion, or very significant for this particular analysis, but it's something to keep in mind!
+The maximum of 194 brings up a good point about our sample: these are only users that are _currently_ on individual plans. This means that they could have been on a paid plan in the past 28 days. I don't think it's a huge portion, or very significant for this particular analysis, but it is something to keep in mind.
 
-Let's look at the distribution.
+Let's look at the distribution of profiles for active free users.
 
 ```{r include = FALSE}
 by_profile <- users %>%
@@ -130,7 +130,29 @@ ggplot(by_profile, aes(x = as.factor(profile_count), y = users)) +
   labs(x = 'Number of Active Profiles', y = 'Users')
 ```
 
-Wow, that's interesting! It looks like most currently active Free users have only scheduled updates to one profile in the past 28 days. Let's look at the CDF of this distribution.
+Wow, that's interesting! It looks like most currently active Free users have only scheduled updates to one profile in the past 28 days. 
+
+One possibility is that there are very new users that have only gotten the chance to schedule updates to one or two profiles. Let's see what would happen if we only looked at users that have sent at least 5 updates in the past 28 days.
+
+```{r echo = FALSE}
+# Group by number of profiles
+by_profile <- users %>%
+  filter(updates_count >= 5) %>%
+  group_by(profile_count) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(proportion = users / sum(users))
+
+# Build bar plot
+ggplot(by_profile, aes(x = as.factor(profile_count), y = users)) +
+  geom_bar(stat = 'identity') +
+  coord_cartesian(xlim = c(1,10)) +
+  geom_text(aes(label = users), position = position_dodge(width=0.9), vjust=-0.25) +
+  labs(x = 'Number of Active Profiles', y = 'Users')
+```
+
+We can see here that the proportion of active users that only schedule to a single profile changes quite a bit, but it is still high at 46.5%. 
+
+Let's look at the CDF of the profiles distribution.
 
 ```{r echo = FALSE}
 ggplot(users, aes(x = profile_count)) + 
@@ -153,4 +175,8 @@ If we were to go with the "less limited" Free plan and only allow users to conne
 
 If we were to go with the "more limited" Free plan and only allow 2 profiles, the data suggests that somewhere around 25% of currently active users would be affected! This equates to around 63k users.
 
-I think it's important to note that this is just a snapshot of _currently_ active users that are _currently_ on Individual plans, but I do think we can infer some insights from them! 
+I think it's important to note that this is just a snapshot of _currently_ active users that are _currently_ on Individual plans. 
+
+There are still important things that we **don't** know as of yet. We don't know how these users with 3 or more profiles will repond if we change the limits, even if they don't actively use all of their profiles. We can assume that a certain amount will updgrade, but a certain amount will also leave Buffer. We also don't quite know what effect word-of-mouth will have. We also may make the assumption that people with only 1 or 2 profiles will be unaffected -- this may not necessarily be the case. We don't fully understand the underlying causal effects that the profile limits have.
+
+One way to get a better understanding of those causal mechanisms would be to run an experiment. If we could adjust the profile limits of a subset of our active Free user population, and allow them to upgrade to increase their limits, we would be able to make a better estimate of how this change might affect our user base and revenue stream. I would suggest running an experiment on a small subset of our active Free user population before making any definitive statement on the effect it will have on revenue. 
