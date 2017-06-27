@@ -1,0 +1,114 @@
+---
+date: 2017-06-27T13:47:17-04:00
+subtitle: ""
+type: "post"
+author: Julian Winternheimer
+tags: []
+title: How many users post 5 times per day?
+---
+
+
+
+<div id="introduction" class="section level2">
+<h2>Introduction</h2>
+<p>A significant part of the Kodiak product cycle and Buffer’s product vision going forward is simplifying the experience for users on a free plan. One of the components we are considering simplifying is the Queue Limit.</p>
+<p>As of June 2017, the Queue Limit refers to the number of updates users on a free plan can have in the Queue <em>of a single profile</em> at any single point in time. This can understandable cause some confusion with users, and can also be exploited (e.g. a user can continuously share an update and add to the queue, sending thousands of updates in a single day without exceeding the Queue Limit).</p>
+<p>One possible solution to this issue is to replace the Queue Limit with a limit on the number of updates that can be <em>shared</em> to a network in a single day. The limit being considered is <strong>5</strong> updates per day, per profile. The goal of this analysis is to estimate how many users this change would affect.</p>
+</div>
+<div id="methodology" class="section level2">
+<h2>Methodology</h2>
+<p>In order to answer this question, we want to know how many users have sent 5 updates in a given day for a given profile. Let’s gather a sample of users that are <em>currently</em> on the free plan, and do a simple count of how many have sent more than 5 updates in a given day. We would also like to understand how often this happens.</p>
+</div>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>We’ll collect the <code>user_id</code>, <code>profile_id</code>, and number of updates sent for each day in the past 60 days for users on the Individual plan with the SQL query below.</p>
+<pre class="sql"><code>select
+  up.user_id
+  , up.profile_id
+  , date(up.sent_at) as update_date
+  , count(distinct up.id) as update_count
+from transformed_updates as up
+inner join users
+  on users.user_id = up.user_id
+where up.status != &#39;service&#39;
+and date(up.sent_at) &gt; (current_date - 60)
+and users.billing_plan = &#39;individual&#39;
+group by 1, 2, 3</code></pre>
+<p>There are around 2.6 rows in this dataset. We want to count how many users there are, and how many have sent 5 or more updates in a single day. Let’s add indicators for each user and each day.</p>
+<pre class="r"><code># Add indicator if user sent 5 or more updates in a single day
+users &lt;- users %&gt;%
+  mutate(sent_5_updates = ifelse(update_count &gt;= 5, 1, 0),
+         over_limit = ifelse(update_count &gt; 5, 1, 0))</code></pre>
+<p>Now we can group by <code>user_id</code>, count how many times each user has hit the limit, and count how many times each user has gone over the limit.</p>
+<pre class="r"><code># Group by user
+by_user &lt;- users %&gt;%
+  group_by(user_id) %&gt;%
+  summarise(days = n_distinct(update_date),
+            total_updates = sum(update_count),
+            days_with_5_updates = sum(sent_5_updates),
+            days_over_limit = sum(over_limit)) %&gt;%
+  mutate(hit_limit = (days_with_5_updates &gt;= 1),
+         over_limit = (days_over_limit &gt;= 1))</code></pre>
+<p>Great! Now we’re ready to address the questions we set out to answer.</p>
+</div>
+<div id="exploratory-analysis" class="section level2">
+<h2>Exploratory analysis</h2>
+<p>Now that we have the counts for each user, let’s calculate how many would have been affected by the new update limit.</p>
+<pre class="r"><code># Count how many hit limit
+by_user %&gt;%
+  group_by(hit_limit) %&gt;%
+  summarise(users = n_distinct(user_id)) %&gt;%
+  mutate(percent = users / sum(users))</code></pre>
+<pre><code>## # A tibble: 2 x 3
+##   hit_limit  users   percent
+##       &lt;lgl&gt;  &lt;int&gt;     &lt;dbl&gt;
+## 1     FALSE 210923 0.8838025
+## 2      TRUE  27731 0.1161975</code></pre>
+<p><img src="/blog/5-posts-per-day_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>We can see that around 11.6% of our sample of 238K users have sent 5 or more updates for a single profile in a single day. That is a significant amount of users, but let’s see how many would actually <em>go over</em> the proposed limit.</p>
+<pre class="r"><code># Count how many would go over limit
+by_user %&gt;%
+  group_by(over_limit) %&gt;%
+  summarise(users = n_distinct(user_id)) %&gt;%
+  mutate(percent = users / sum(users))</code></pre>
+<pre><code>## # A tibble: 2 x 3
+##   over_limit  users    percent
+##        &lt;lgl&gt;  &lt;int&gt;      &lt;dbl&gt;
+## 1      FALSE 218379 0.91504437
+## 2       TRUE  20275 0.08495563</code></pre>
+<p><img src="/blog/5-posts-per-day_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>Of the users in our sample, only around 8.5% would have gone <em>over</em> the limit of 5 updates per day for a single profile in the past 60 days. This still equates to around 20 thousand users however. How many times, in the past 60 days, have these users hit the 5-update limit?</p>
+</div>
+<div id="how-often-do-people-hit-the-limit" class="section level2">
+<h2>How often do people hit the limit?</h2>
+<p>In order to answer this question, let’s first count the number of days that these users have sent 5 or more updates. Then we can visualize that distribution.</p>
+<pre class="r"><code># Filter to only include users that sent 5 or more updates in a day for a profile
+limit_users &lt;- by_user %&gt;%
+  filter(hit_limit == TRUE)</code></pre>
+<p>Now let’s visualize the distribution of <code>days_with_5_updates</code> for this subset of users.</p>
+<pre><code>## Warning: Removed 960 rows containing non-finite values (stat_density).</code></pre>
+<p><img src="/blog/5-posts-per-day_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>As we might have suspected, most users hit that 5-update limit on a small number of occasions. A few users hit the hypothetical quite frequently however. Let’s try to get a better understanding of how many users that represents.</p>
+<pre><code>## Warning: Removed 960 rows containing non-finite values (stat_bin).</code></pre>
+<p><img src="/blog/5-posts-per-day_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>Alright, that’s good to know. There are still thousands of users (around 18 thousand) that would hit the proposed limit multiple times.</p>
+<p>This still doesn’t quite tell the whole story however. Some of these users could have just joined Buffer – others could have been with Buffer for years. In an attempt to control for these differences somewhat, let’s calculate <em>the proportion of days that have 5 or more updates for each user</em>. Keep in mind that these only count updates from the past 60 days.</p>
+<pre class="r"><code># Calculate proportion of days in which users hit the limit
+limit_users &lt;- limit_users %&gt;%
+  mutate(percent_of_days = days_with_5_updates / days * 100)</code></pre>
+<p>Now let’s visualize the distribution of <code>percent_of_days</code> for users.</p>
+<pre><code>## Warning: Removed 1667 rows containing non-finite values (stat_density).</code></pre>
+<p><img src="/blog/5-posts-per-day_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
+<p>So what does this graph tell us? For a significant group of users <em>that have hit the hypothetical update limit in the past 60 days</em>, they’ve hit the limit on a small percentage of days that they’ve been active. In other words, on less than 10% of days that they have been active, they’ve hit the 5-update limit.</p>
+<p>However, the CDF below tells us that, of the users that have hit the limit in the past 60 days, around 75% (20k users) hit it on over 10% of days in which they were active (with active defined as having sent at least one update). Around 19% (5k) of these users hit the limit on more than half of the days in which they were active.</p>
+<pre><code>## Warning: Removed 1667 rows containing non-finite values (stat_ecdf).</code></pre>
+<p><img src="/blog/5-posts-per-day_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+<p>So what conclusions can we draw from these graphs and summary statistics?</p>
+</div>
+<div id="conclusions" class="section level2">
+<h2>Conclusions</h2>
+<p>The data suggests that a significant portion of our free user base would be affected by this new update limit. Around 11.6% of all free users that have scheduled an update in the past 60 days would have hit this limit – that equates to around <strong>27 thousand individuals</strong>. Of those, only around 20 thousand went over the limit at least once in the past 60 days.</p>
+<p>Of the users that sent at least 5 updates for a single profile in a single day, around half did so in more than 20% of days in which they were active. This suggests that there is a group of users that consistently sends 5+ updates to single profiles in a given day.</p>
+<p>If we were to introduce this limit for free users, it’s difficult to say definitively how the affected users would react. There must be some that upgrade, but others will be likely to leave or switch services. Without experimentation, it’s just tricky to tell.</p>
+<p>If the goal is to reduce confusion (and not just increase revenue), we might consider having a limit of <strong>10</strong> updates per day instead of 5. It would reduce the number of users affected by over 70% (8K instead of 27K) while still having clearer limits and reducing the possibility for abuse.</p>
+</div>

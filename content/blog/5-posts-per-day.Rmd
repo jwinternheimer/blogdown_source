@@ -1,0 +1,201 @@
+---
+date: 2017-06-27T13:47:17-04:00
+subtitle: ""
+type: "post"
+author: Julian Winternheimer
+tags: []
+title: How many users post 5 times per day?
+---
+
+## Introduction
+A significant part of the Kodiak product cycle and Buffer's product vision going forward is simplifying the experience for users on a free plan. One of the components we are considering simplifying is the Queue Limit. 
+
+As of June 2017, the Queue Limit refers to the number of updates users on a free plan can have in the Queue _of a single profile_ at any single point in time. This can understandable cause some confusion with users, and can also be exploited (e.g. a user can continuously share an update and add to the queue, sending thousands of updates in a single day without exceeding the Queue Limit).
+
+One possible solution to this issue is to replace the Queue Limit with a limit on the number of updates that can be _shared_ to a network in a single day. The limit being considered is **5** updates per day, per profile. The goal of this analysis is to estimate how many users this change would affect. 
+
+## Methodology
+In order to answer this question, we want to know how many users have sent 5 updates in a given day for a given profile. Let's gather a sample of users that are _currently_ on the free plan, and do a simple count of how many have sent more than 5 updates in a given day. We would also like to understand how often this happens. 
+
+## Data collection
+We'll collect the `user_id`, `profile_id`, and number of updates sent for each day in the past 60 days for users on the Individual plan with the SQL query below.
+
+```{r include = FALSE}
+library(buffer); library(dplyr); library(ggplot2)
+```
+
+```{r include = FALSE}
+con <- redshift_connect()
+```
+
+```{sql connection=con, eval=FALSE}
+select
+  up.user_id
+  , up.profile_id
+  , date(up.sent_at) as update_date
+  , count(distinct up.id) as update_count
+from transformed_updates as up
+inner join users
+  on users.user_id = up.user_id
+where up.status != 'service'
+and date(up.sent_at) > (current_date - 60)
+and users.billing_plan = 'individual'
+group by 1, 2, 3
+```
+
+```{r include = F}
+# Save users
+# save(users, file = "five_updates.Rda")
+
+# Load users data
+load("five_updates.Rda")
+```
+
+There are around 2.6 rows in this dataset. We want to count how many users there are, and how many have sent 5 or more updates in a single day. Let's add indicators for each user and each day.
+
+```{r}
+# Add indicator if user sent 5 or more updates in a single day
+users <- users %>%
+  mutate(sent_5_updates = ifelse(update_count >= 5, 1, 0),
+         over_limit = ifelse(update_count > 5, 1, 0))
+```
+
+Now we can group by `user_id`, count how many times each user has hit the limit, and count how many times each user has gone over the limit.
+
+```{r}
+# Group by user
+by_user <- users %>%
+  group_by(user_id) %>%
+  summarise(days = n_distinct(update_date),
+            total_updates = sum(update_count),
+            days_with_5_updates = sum(sent_5_updates),
+            days_over_limit = sum(over_limit)) %>%
+  mutate(hit_limit = (days_with_5_updates >= 1),
+         over_limit = (days_over_limit >= 1))
+```
+
+Great! Now we're ready to address the questions we set out to answer.
+
+## Exploratory analysis
+Now that we have the counts for each user, let's calculate how many would have been affected by the new update limit.
+
+```{r}
+# Count how many hit limit
+by_user %>%
+  group_by(hit_limit) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users))
+```
+
+
+```{r echo = F}
+# Count how many hit limit
+hit_limit <- by_user %>%
+  group_by(hit_limit) %>%
+  summarise(users = n_distinct(user_id))
+
+# Create bar plot
+ggplot(hit_limit, aes(x = hit_limit, y = users)) +
+  geom_bar(stat = 'identity') +
+  geom_text(aes(label = users), position = position_dodge(width=0.9), vjust=-0.25) +
+  labs(x = 'Hit Update Limit', y = 'Users')
+```
+
+We can see that around 11.6% of our sample of 238K users have sent 5 or more updates for a single profile in a single day. That is a significant amount of users, but let's see how many would actually _go over_ the proposed limit.
+
+```{r}
+# Count how many would go over limit
+by_user %>%
+  group_by(over_limit) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users))
+```
+
+
+```{r echo = F}
+# Count how many go over limit
+over_limit <- by_user %>%
+  group_by(over_limit) %>%
+  summarise(users = n_distinct(user_id))
+
+# Create bar plot
+ggplot(over_limit, aes(x = over_limit, y = users)) +
+  geom_bar(stat = 'identity') +
+  geom_text(aes(label = users), position = position_dodge(width=0.9), vjust=-0.25) +
+  labs(x = 'Went Over Update Limit', y = 'Users')
+```
+
+Of the users in our sample, only around 8.5% would have gone _over_ the limit of 5 updates per day for a single profile in the past 60 days. This still equates to around 20 thousand users however. How many times, in the past 60 days, have these users hit the 5-update limit?
+
+## How often do people hit the limit?
+In order to answer this question, let's first count the number of days that these users have sent 5 or more updates. Then we can visualize that distribution.
+
+```{r}
+# Filter to only include users that sent 5 or more updates in a day for a profile
+limit_users <- by_user %>%
+  filter(hit_limit == TRUE)
+```
+
+Now let's visualize the distribution of `days_with_5_updates` for this subset of users. 
+
+```{r echo = FALSE}
+# Plot density curve
+ggplot(limit_users, aes(x = days_with_5_updates)) +
+  geom_density() +
+  scale_x_continuous(limits = c(0, 50))
+```
+
+As we might have suspected, most users hit that 5-update limit on a small number of occasions. A few users hit the hypothetical quite frequently however. Let's try to get a better understanding of how many users that represents.
+
+```{r echo = FALSE}
+# Plot histogram
+ggplot(limit_users, aes(x = days_with_5_updates)) +
+  geom_histogram(binwidth = 1) +
+  scale_x_continuous(limits = c(0, 50)) +
+  labs(x = 'Days with 5 or more updates', y = 'Users', title = 'Frequency of Hitting 5-Update Limit')
+```
+
+Alright, that's good to know. There are still thousands of users (around 18 thousand) that would hit the proposed limit multiple times. 
+
+This still doesn't quite tell the whole story however. Some of these users could have just joined Buffer -- others could have been with Buffer for years. In an attempt to control for these differences somewhat, let's calculate _the proportion of days that have 5 or more updates for each user_. Keep in mind that these only count updates from the past 60 days.
+
+```{r}
+# Calculate proportion of days in which users hit the limit
+limit_users <- limit_users %>%
+  mutate(percent_of_days = days_with_5_updates / days * 100)
+```
+
+Now let's visualize the distribution of `percent_of_days` for users.
+
+```{r echo = FALSE}
+# Plot density curve
+ggplot(limit_users, aes(x = percent_of_days)) +
+  geom_density() +
+  scale_x_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
+  labs(x = 'Percent of Days with 5 or More Updates', y = 'Density')
+```
+
+So what does this graph tell us? For a significant group of users _that have hit the hypothetical update limit in the past 60 days_, they've hit the limit on a small percentage of days that they've been active. In other words, on less than 10% of days that they have been active, they've hit the 5-update limit.
+
+However, the CDF below tells us that, of the users that have hit the limit in the past 60 days, around 75% (20k users) hit it on over 10% of days in which they were active (with active defined as having sent at least one update). Around 19% (5k) of these users hit the limit on more than half of the days in which they were active. 
+
+```{r echo = FALSE}
+# Plot CDF
+ggplot(limit_users, aes(x = percent_of_days)) +
+  stat_ecdf() +
+  scale_x_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2)) + 
+  labs(x = 'Percent of Days with 5 or More Updates', y = '', title = 'CDF of the Percent of Days with 5+ Updates')
+```
+
+So what conclusions can we draw from these graphs and summary statistics?
+
+## Conclusions
+The data suggests that a significant portion of our free user base would be affected by this new update limit. Around 11.6% of all free users that have scheduled an update in the past 60 days would have hit this limit -- that equates to around **27 thousand individuals**. Of those, only around 20 thousand went over the limit at least once in the past 60 days. 
+
+Of the users that sent at least 5 updates for a single profile in a single day, around half did so in more than 20% of days in which they were active. This suggests that there is a group of users that consistently sends 5+ updates to single profiles in a given day.
+
+If we were to introduce this limit for free users, it's difficult to say definitively how the affected users would react. There must be some that upgrade, but others will be likely to leave or switch services. Without experimentation, it's just tricky to tell. 
+
+If the goal is to reduce confusion (and not just increase revenue), we might consider having a limit of **10** updates per day instead of 5. It would reduce the number of users affected by over 70% (8K instead of 27K) while still having clearer limits and reducing the possibility for abuse. 
+
