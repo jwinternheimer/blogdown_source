@@ -1,5 +1,6 @@
 ---
 date: 2017-06-21T20:01:45-04:00
+author: Julian Winternheimr
 subtitle: "Not too many."
 bigimg: [{src: "/blog/profile_analysis_files/figure-html/unnamed-chunk-10-1.png"}]
 type: "post"
@@ -32,21 +33,27 @@ library(buffer); library(dplyr); library(ggplot2)
 con <- redshift_connect()
 ```
 
-```{sql connection=con, eval=FALSE}
+```{sql connection=con, eval = FALSE}
 with user_facts as (
   select
     up.user_id
     , max(up.created_at) as last_update_created_at
+    , count(distinct p.profile_id) as number_of_profiles
   from transformed_updates as up
   inner join users
     on users.user_id = up.user_id
+  left join profiles as p
+    on p.user_id = users.user_id
   where up.status != 'service'
   and users.billing_plan = 'individual'
+  and p.is_disabled = false
+  and p.is_deleted = false
   group by up.user_id
 )
 select
   user_id
   , last_update_created_at
+  , number_of_profiles
 from user_facts
 where last_update_created_at > (current_date - 29)
 ```
@@ -59,7 +66,7 @@ where last_update_created_at > (current_date - 29)
 load("user_profiles.Rda")
 ```
 
-There are around 250 thousand users in this dataset! Now we need to get the number of updates they have scheduled, and the number of profiles that they have scheduled updates for.
+There are around 250 thousand users in this dataset! Now we need to get the number of updates they have scheduled, and the number of profiles that they have scheduled updates for _in the past 28 days_.
 
 ```{sql connection=con, eval=FALSE}
 select
@@ -95,7 +102,42 @@ users[is.na(users)] <- 0
 ```
 
 ## Exploratory analysis
-Now that we have the updates and profile counts for each active user, we can compute some quick summary statistics for our population.
+Now that we have the updates and profile counts for each active user, we can compute some quick summary statistics for our population. Let's first only look at the number of profiles as these _currently active_ free users have connected.
+
+```{r}
+# Summarise the number of profiles
+summary(users$number_of_profiles)
+```
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+# Count number of users have have each profile count
+by_profile <- users %>%
+  group_by(number_of_profiles) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users))
+
+# Plot histogram
+ggplot(by_profile, aes(x = number_of_profiles, y = users)) +
+  geom_bar(stat = 'identity') +
+  scale_x_continuous(limits = c(0, 6)) +
+  geom_text(aes(label = users), position = position_dodge(width=0.9), vjust=-0.25) +
+  labs(x = 'Number of Profiles Connected', y = 'Users', title = 'Total Number of Profiles')
+```
+
+This summary and bar chart tell us a few important factoids. 
+
+ - Around 38% of currently active free users have 1 (non-disabled) profiles connected.
+ - Around 25% of currently active free users have 2 (non-disabled) profiles connected.
+ - Around 21% of currently active free users have 3 (non-disabled) profiles connected.
+ - Around 12% of currently active free users have 4 (non-disabled) profiles connected.
+ - Around 37% of currently active free users have _more than 2_ (non-disabled) profiles connected.
+ - Around 16% of currently active free users have _more than 3_ (non-disabled) profiles connected.
+ 
+**The 37% of users that have more than 2 profiles connected equates to around 92 thousand users. That is a large number of active users that would be affected if we changed the profile limit to 2 profiles.**
+
+If instead we changed the profile limit to 3, around 16% of _active_ free users would be affected, which equates to around 40 thousand users. 
+
+In this case we're only considering profiles that active users have connected to Buffer. What if instead we only looked at the number of profiles that these users have scheduled updates for in the past 28 days? We can do this by looking at the `profile_count` dimension, which was derived from the `updates` table.
 
 ```{r}
 # Get summary stats on the number of profiles
@@ -171,12 +213,14 @@ Interesting! This graph tells us the following:
  - Around 98% of users scheduled updates to 4 or less profiles in the past 28 days.
  
 ## Conclusions
-If we were to go with the "less limited" Free plan and only allow users to connect up to 3 profiles, the data suggests that somewhere around 10% of currently active users would be affected. This equates to around 25k users.
+There are a couple important considerations to be made based on this data. Over 90 thousand users, or around 37% of the active free user population, has more than 2 profiles connected to Buffer as of June 2017. Around 40 thousand users, 16% of the active free user population, has more than 3 profiles connected. These are significant portions of Buffer's userbase. 
 
-If we were to go with the "more limited" Free plan and only allow 2 profiles, the data suggests that somewhere around 25% of currently active users would be affected! This equates to around 63k users.
+We could consider that users don't necessarily use all of the profiles that they have connected to Buffer. For example, a user could have 4 profiles connected and only schedule updates for a single twitter account. The data suggests that this happens fairly often -- around 76% of active free users only scheduled updates to two or less profiles in the past 28 days. 
 
-I think it's important to note that this is just a snapshot of _currently_ active users that are _currently_ on Individual plans. 
+However, the fact that many users haven't scheduled updates for all of their profiles recently in Buffer doesn't necessarily mean that they would react or be affected by these changes to the profile limits.
 
-There are still important things that we **don't** know as of yet. We don't know how these users with 3 or more profiles will respond if we change the limits, even if they don't actively use all of their profiles. We can assume that a certain amount will upgrade, but a certain amount will also leave Buffer. We also don't quite know what effect word-of-mouth will have. We also may make the assumption that people with only 1 or 2 profiles will be unaffected -- this may not necessarily be the case. We don't fully understand the underlying causal effects that the profile limits have.
+We can assume that a certain amount will upgrade, but a certain amount will also leave Buffer. We also don't quite know what effect word-of-mouth will have. We also may make the assumption that people with only 1 or 2 profiles will be unaffected -- this may not necessarily be the case. We don't fully understand the underlying causal effects that the profile limits have.
 
 One way to get a better understanding of those causal mechanisms would be to run an experiment. If we could adjust the profile limits of a subset of our active Free user population, and allow them to upgrade to increase their limits, we would be able to make a better estimate of how this change might affect our user base and revenue stream. I would suggest running an experiment on a small subset of our active Free user population before making any definitive statement on the effect it will have on revenue. 
+
+Given the large number of people that would be affected, I would strongly suggest running experiments to better understand how free users and new users would react to these changes in profile limits.
