@@ -1,0 +1,184 @@
+---
+date: 2017-06-30T08:25:27-04:00
+author: Julian Winternheimr
+subtitle: ""
+type: "post"
+tags: []
+title: "How many users will be affected by the Free plan limits?"
+---
+
+
+
+<div id="introduction" class="section level2">
+<h2>Introduction</h2>
+<p>Over the past few weeks, simplifying the free plan has become a theme and key component of realizing our product vision. <a href="https://paper.dropbox.com/doc/Proposal-Moving-to-a-simplified-free-plan.-OdDlmTlduGjc2Zqoj4RAR"><strong>This Paper</strong></a> has a lot of good context and discussion around what that involves.</p>
+<p>There are four major components to this change:</p>
+<ul>
+<li>Reducing the profile limit to 2</li>
+<li>Reducing the number of updates people can send to 5 per day per profile</li>
+<li>Removing the ‘Share Now’ option</li>
+<li>Removing custom scheduling</li>
+</ul>
+<p>The goal of this analysis is to estimate how many active users would be affected by each component. :)</p>
+</div>
+<div id="methodology" class="section level2">
+<h2>Methodology</h2>
+<p>I believe we can gather the <code>user_id</code>’s of users affected by each change with a bit of SQL and Looker magic. Once we have the IDs of users affected by each change, we can join the lists into a single list and count the number of changes that would affect each. Then we will be able to calculate some summary statistics to see how many would be affected by only 1 change, 2 changes, 3 changes, or each change.</p>
+</div>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>Let’s start by gathering the <code>user_id</code>’s of active Individual users that have more than 2 profiles connected. Active is defined as having sent at least one update through Buffer in the past 30 days.</p>
+<pre class="sql"><code>with user_facts as (
+  select
+    up.user_id
+    , max(up.created_at) as last_update_created_at
+    , count(distinct p.profile_id) as number_of_profiles
+  from transformed_updates as up
+  inner join users
+    on users.user_id = up.user_id
+  left join profiles as p
+    on p.user_id = users.user_id
+  where up.status != &#39;service&#39;
+  and users.billing_plan = &#39;individual&#39;
+  and p.is_disabled = false
+  and p.is_deleted = false
+  group by up.user_id
+)
+select
+  user_id
+  , last_update_created_at
+  , number_of_profiles
+from user_facts
+where last_update_created_at &gt;= (current_date - 30)
+and number_of_profiles &gt; 2</code></pre>
+<p>Now let’s gather the users that have shared over 5 updates in a single day to a single profile <em>in the past 90 days</em>. We’ll start by collecting the <code>user_id</code>, <code>profile_id</code>, and number of updates sent for each day in the past 90 days for users on the Individual plan with the SQL query below.</p>
+<pre class="sql"><code>select
+  up.user_id
+  , up.profile_id
+  , date(up.sent_at) as update_date
+  , count(distinct up.id) as update_count
+from transformed_updates as up
+inner join users
+  on users.user_id = up.user_id
+where up.status != &#39;service&#39;
+and date(up.sent_at) &gt; (current_date - 90)
+and users.billing_plan = &#39;individual&#39;
+group by 1, 2, 3</code></pre>
+<p>We just need to do a bit of transformation to find the users that meet our criteria.</p>
+<pre class="r"><code># Add indicator if user sent 5 or more updates in a single day
+users_five_updates &lt;- users_five_updates %&gt;%
+  mutate(sent_5_updates = ifelse(update_count &gt;= 5, 1, 0),
+         over_limit = ifelse(update_count &gt; 5, 1, 0))
+
+# Group by user
+users_five_updates &lt;- users_five_updates %&gt;%
+  group_by(user_id) %&gt;%
+  summarise(days = n_distinct(update_date),
+            total_updates = sum(update_count),
+            days_with_5_updates = sum(sent_5_updates),
+            days_over_limit = sum(over_limit)) %&gt;%
+  mutate(hit_limit = (days_with_5_updates &gt;= 1),
+         over_limit = (days_over_limit &gt;= 1)) %&gt;%
+  filter(over_limit == TRUE)</code></pre>
+<p>Cool! Now let’s find the number of free users that have used the share now option in the past 30 days.</p>
+<pre class="sql"><code>select
+  up.user_id
+  , count(distinct up.id) as update_count
+from transformed_updates as up
+inner join users
+  on users.user_id = up.user_id
+where up.status != &#39;service&#39;
+and date(up.sent_at) &gt; (current_date - 30)
+and users.billing_plan = &#39;individual&#39;
+and up.was_shared_immediately = TRUE
+group by up.user_id</code></pre>
+<p>Great! Now let’s find the users that have used a custom schedule feature in the past 30 days.</p>
+<pre class="sql"><code>select
+  a.user_id
+  , count(distinct a.id) as count
+from actions_taken as a
+inner join users
+  on users.user_id = a.user_id
+where date(a.date) &gt; (current_date - 30)
+and users.billing_plan = &#39;individual&#39;
+and (a.full_scope = &#39;dashboard updates shared composer schedule&#39;
+  or a.full_scope = &#39;extension composer multiple-composers updates shared schedule&#39;
+  or a.full_scope = &#39;dashboard updates shared composer schedule pinned&#39;
+  or a.full_scope = &#39;dashboard queue changed_update change_custom_scheduled_time&#39;
+  or a.full_scope = &#39;dashboard updates shared composer schedule rebuffer&#39;
+  or a.full_scope = &#39;dashboard updates shared composer schedule groups pinned&#39;
+  )
+group by a.user_id</code></pre>
+<p>Now we have all of the <em>active</em> users that would be directly affected by these changes. Now we need to join these four separate data frames and count the number of items they will be affected by.</p>
+</div>
+<div id="data-tidying" class="section level2">
+<h2>Data tidying</h2>
+<p>We need to add indicators to each dataframe to show what change the users are affected by. We can also drop columns that are no longer needed.</p>
+<pre class="r"><code># Drop columns
+users_two_profiles &lt;- users_two_profiles %&gt;% select(user_id)
+users_five_updates &lt;- users_five_updates %&gt;% select(user_id)
+users_shared_now &lt;- users_shared_now %&gt;% select(user_id)
+users_custom_schedule &lt;- users_custom_schedule %&gt;% select(user_id)
+
+# Add indicators
+users_two_profiles$profile_limit &lt;- TRUE
+users_shared_now$share_now &lt;- TRUE
+users_five_updates$update_limit &lt;- TRUE
+users_custom_schedule$custom_schedule &lt;- TRUE</code></pre>
+<p>Now let’s join all of our dataframes into one. :)</p>
+<pre class="r"><code># Join tables
+users &lt;- users_two_profiles %&gt;%
+  full_join(users_five_updates, by = &#39;user_id&#39;) %&gt;%
+  full_join(users_shared_now, by = &#39;user_id&#39;) %&gt;%
+  full_join(users_custom_schedule, by = &#39;user_id&#39;)</code></pre>
+<p>There are over 170 thousand users in total. This is more than half of the active Free user population!</p>
+<p>Now we’re ready for some summary stats.</p>
+</div>
+<div id="data-visualization" class="section level2">
+<h2>Data visualization</h2>
+<p>Let’s visualize the distribution of the number of items each user is affected by.</p>
+<p><img src="/blog/free-plan-limits_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+<p>Alright, around 94K users would only be affected by one of the changes. This is about 54% of the population. Around 55K users would be affected by two changes (32%), around 21K users would be affected by 3 changes (12%), and around 2 thousand users would be affected by all 4 changes.</p>
+<p>But which change accounts for the most users affected? Let’s start by only looking at those users only affected by a single change.</p>
+<pre class="r"><code># Filter users
+single &lt;- users %&gt;%
+  filter(changes_affecting == 1)</code></pre>
+<p>There are 94 thousand of these users. Let’s count how many would be affected by the 2 profile limit.</p>
+<pre class="r"><code>single %&gt;%
+  filter(profile_limit == TRUE) %&gt;%
+  count</code></pre>
+<pre><code>## # A tibble: 1 x 1
+##       n
+##   &lt;int&gt;
+## 1 32404</code></pre>
+<p>Around 32 thousand users. This is around 34% of the users. Let’s count users affected by the update limit.</p>
+<pre class="r"><code>single %&gt;%
+  filter(update_limit == TRUE) %&gt;%
+  count</code></pre>
+<pre><code>## # A tibble: 1 x 1
+##       n
+##   &lt;int&gt;
+## 1 11733</code></pre>
+<p>Around 12 thousand users would be affected by the update limit. This is around 12% of users. How about the Share Now feature?</p>
+<pre class="r"><code>single %&gt;%
+  filter(share_now == TRUE) %&gt;%
+  count</code></pre>
+<pre><code>## # A tibble: 1 x 1
+##       n
+##   &lt;int&gt;
+## 1 26537</code></pre>
+<p>Around 26 thousand users (around 28%). How about the custom schedule?</p>
+<pre class="r"><code>single %&gt;%
+  filter(custom_schedule == TRUE) %&gt;%
+  count</code></pre>
+<pre><code>## # A tibble: 1 x 1
+##       n
+##   &lt;int&gt;
+## 1 23342</code></pre>
+<p>Around 23 thousand users, or 25%.</p>
+</div>
+<div id="conclusions" class="section level2">
+<h2>Conclusions</h2>
+<p>More than half of the active user population on the free plan would be affected by at least one of these proposed changes. Around 94K users would only be affected by one of the changes, which represents about 54% of the population. Around 55K users would be affected by two changes (32%), around 21K users would be affected by 3 changes (12%), and around 2 thousand users would be affected by all 4 changes.</p>
+<p>These are large numbers. Experimentation and communication feel very essential.</p>
+</div>
