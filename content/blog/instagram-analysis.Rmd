@@ -1,0 +1,376 @@
+---
+date: 2017-07-05T08:08:39-04:00
+author: Julian Winternheimr
+subtitle: "Take better pictures of people!"
+type: "post"
+tags: []
+title: "How do I get more likes on Instagram?"
+---
+
+I haven't asked myself this question before, and I've never tried to optimize my Instagram posts for maximum likeage. I have made a couple of observations though:
+
+ - Instagram posts that are shared earlier in the day, while my friends and colleagues in Europe are still awake, _seem_ to get more likes more quickly. 
+ 
+ - Posts that include people and faces seem to get more likes.
+ 
+ - Images of New York (which happen to include the #nyc hashtag) tend to get lots of likes.
+ 
+In this analysis I'll test these hypotheses and see if there is any substance behind the claims.
+
+## Data collection
+Luckily for me, Buffer already collects Instagram data to provide analytics to our customers. I can simply query our `updates` table in Redshift. If you wanted to replicate this analysis for your own Instagram posts, you could try using Pablo Barbera's `instaR` package [**here**](https://github.com/pablobarbera/instaR).
+
+We'll use this query to get my last 50 Instagram posts.
+
+```{r include = FALSE}
+library(buffer); library(dplyr); library(ggplot2); library(lubridate)
+```
+
+```{r include = FALSE}
+con <- redshift_connect()
+```
+
+```{sql connection=con, eval = FALSE}
+select
+  u.id
+  , u.profile_id
+  , u.profile_service
+  , u.sent_at as created_at
+  , u.text
+  , u.number_of_hashtags as hashtags
+  , u.sum_number_of_photos as number_of_images
+  , u.number_of_likes as likes
+  , u.number_of_comments as comments
+from transformed_updates as u
+left join profiles as p
+  on u.profile_id = p.profile_id
+where p.service = 'instagram'
+and p.service_username = 'julianwinternheimer'
+and u.sent_at is not null
+```
+
+```{r include = F}
+# Save posts
+# save(posts, file = "julian_posts.Rda")
+
+# Load users data
+load("julian_posts.Rda")
+```
+
+Great, we got them. Now let's do some exploratory analysis.
+
+```{r include = F}
+# Fix an error
+i <- grep("First climbing session", posts$text)
+posts[i, ]$likes <- 43
+
+# Remove Buffer post
+x <- grep("Buffer for Instagram", posts$text)
+posts <- posts[-x, ]
+```
+
+
+## Exploratory analysis
+There are 50 posts in this dataset. Let's see when I posted them.
+
+```{r}
+# Get max and min dates
+range(posts$created_at)
+```
+
+The earliest post in this dataset was from December 9, 2015 (day after my birthday!) and the most recent is from this week. Let's try to get a sense of how frequently I've posted to Instagram.
+
+```{r}
+# Extrace the month
+posts$month <- format(as.Date(posts$created_at), "%Y-%m")
+```
+
+```{r echo = FALSE}
+# Make a histogram of posts per month
+ggplot(posts) +
+  geom_bar(aes(x = month), stat = 'count', color = 'white') +
+  scale_y_continuous(breaks = seq(0, 10, 2)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = '', y = '', title = 'Number of Instagram Posts')
+```
+
+This histogram shows the number of Instagram posts I shared for each month. Notice that there are months missing from this graph (September 2016, February 2017). I didn't share anything in these months. 
+
+It looks like I shared a lot in the late summer months of 2016 -- what was going on then? In July and August I was traveling in Europe and shared lots of pictures. In October I was excited to be back in New York, and shared a lot of city pictures.
+
+![](http://i.imgur.com/cFfVoga.jpg)
+
+Since last summer, I've been consistently sharing only 1 or 2 posts to Instagram per month. I need to step up my game! 
+
+### Number of Likes
+Let's gather some summary stats on the number of likes I've gotten.
+
+```{r}
+# Summarize the number of likes
+summary(posts$likes)
+```
+
+```{r echo = F}
+# Plot distribution of likes
+ggplot(posts) +
+  geom_histogram(aes(x = likes), binwidth = 5, color = 'white') +
+  labs(x = 'Likes', y = 'Posts', title = 'Likes Histogram')
+```
+
+The average number of likes I've gotten on the past 50 posts is around 35. From the histogram above, we can see that there is a peak at the 35-40 like bin and the distribution is somewhat Gaussian in shape. There is also a bit of a long tail, for the few posts that have gotten a lot of likes (50+).
+
+Has the number of likes I've gotten changed much over time? Let's plot out the number of likes as a function of time.
+
+```{r echo = FALSE}
+ggplot(posts, aes(x = created_at, y = likes)) +
+  geom_point(position = "jitter") + 
+  stat_smooth(method = "lm") + 
+  labs(x = '', y = '', title = 'Number of Likes Over Time')
+```
+
+Aha! As time has gone by, my Instagram posts have gotten more likes. The key question is whether or not this trend is due to factors we'll analyze, such as hour of day, number of hashtags, etc. Did I become a better instagrammer or not? My guess would be probably not. :-\
+
+I probably have my Buffer friends, who are very active on social media and generous with the likes, to thank. :) There are other factors at play as well. The introduction of stories likely increased engagement on Instagram, which may or may not have gotten more eyeballs on my posts. I also gained some followers over the past year, which increased the likelihood of getting likes.
+
+Because of the assumption that factors out of my control contribute to this positive trend, we might want to control for time in our analysis by removing the trend.
+
+**How does the hour of the day affect likes?**
+
+This is a question I've wondered about for a little while. Let's see if we can summarize this. First we need to extract the hour of day.
+
+```{r}
+# Extract the hour
+posts$hour <- hour(posts$created_at)
+```
+
+First, let's see how often I've posted in each hour.
+
+```{r echo = FALSE}
+ggplot(posts) +
+  geom_bar(aes(x = hour), stat = "count") +
+  labs(x = "Hour of Day", y = "", title = "Number of Posts by Hour")
+```
+
+I tend to post later in the afternoon, and really like that 3pm hour. 
+
+Now let's plot the median, minimum, and maximum amount of likes for posts shared on each hour of the day. 
+
+```{r echo = FALSE}
+ggplot(data = posts, aes(x = as.factor(hour), y = likes)) + 
+  stat_summary(
+    fun.ymin = min,
+    fun.ymax = max,
+    fun.y = median
+  ) +
+  labs(x = 'Hour', y = '', title = 'Likes by Hour of Day')
+```
+
+At first glance, this looks pretty scattershot to me. My theory on posting hour may be debunked! 
+
+### The type of post
+Naturally we would assume that the content itself has an influence on the number of likes the post receives. Or we would hope. The three images below are all unique, and there are significant differences in the number of likes they've received.
+
+![](http://i.imgur.com/dsGcF1U.jpg)
+
+A tedious but necessary step is to manually categorize each image. I will set the categories as either `travel`, `landscape`, `people`, `food`, `nyc`, `video` and `other`. I'll assign only one category for each image. There will definitely be overlap, but I'll do my best to label the appropriate and predominant theme. 
+
+```{r include = FALSE}
+# Set categories
+types <- c('travel', 
+           'travel', 'people', 'landscape', 
+           'travel', 'video', 'other', 
+           'travel', 'landscape', 'landscape', 
+           'travel', 'travel', 'nyc', 
+           'people', 'nyc', 'other', 
+           'other', 'other', 'landscape',
+           'landscape', 'nyc', 'food',
+           'other', 'nyc', 'nyc',
+           'travel', 'travel' , 'travel',
+           'travel', 'travel', 'travel',
+           'travel', 'nyc', 'nyc',
+           'video', 'nyc', 'nyc',
+           'people', 'nyc', 'people',
+           'people', 'nyc', 'landscape',
+           'travel' ,'people', 'nyc',
+           'landscape', 'nyc', 'people')
+
+# Set post types
+posts$type <- types
+```
+
+Now let's see if we can detect any difference in the number of likes that comes from the image type.
+
+```{r echo = FALSE}
+ggplot(data = posts, aes(x = as.factor(type), y = likes, color = type)) + 
+  stat_summary(
+    fun.ymin = min,
+    fun.ymax = max,
+    fun.y = median
+  ) +
+  labs(x = '', y = '', title = 'Likes by Type of Post')
+```
+
+It looks like there are some detectable differences. Posts that have people in them have the highest median number of likes (around 50). NYC posts have a lower median, but a very wide range of likes. Travel and Landscape photos are also up there, but not quite as high as the people posts.
+
+If I'm optimizing for likes, I would consider _not_ sharing images of random stuff, food, and videos.
+
+### What about hashtags?
+Let's see!
+
+```{r echo = FALSE}
+ggplot(data = posts, aes(x = as.factor(hashtags), y = likes)) + 
+  stat_summary(
+    fun.ymin = min,
+    fun.ymax = max,
+    fun.y = median
+  ) +
+  labs(x = '', y = '', title = 'Likes by Number of Hashtags')
+```
+
+I don't use hashtags very often, so this might not be a great sample to work with. I've tended to use the "#nyc" hashtag with NYC photos, so that may be why there is a slightly higher distribution of likes there. 
+
+## Detrending by modeling
+As we saw earlier in this analysis, there is a positive trend in the number of likes my posts have gotten over time. 
+
+```{r echo = FALSE}
+ggplot(posts, aes(x = created_at, y = likes)) +
+  geom_point(position = "jitter") + 
+  stat_smooth(method = "lm") + 
+  labs(x = '', y = '', title = 'Number of Likes Over Time')
+```
+
+I believe that this positive trend is not due to my experiene with Instagram or any other factors that I control. For this reason, I'd like to _detrend_ the data before we analyze it.
+
+Let's figure out the formula for that linear regression model.
+
+```{r}
+# Fit linear regression model
+detrend <- lm(likes ~ created_at, data = posts)
+
+# Summarize model
+detrend
+```
+
+Now let's subtract the residuals from this model from our original dataset.
+
+```{r}
+# Calculate detrended likes
+posts$likes_detrended <- resid(detrend)
+```
+
+Now let's plot the detrended likes over time.
+
+```{r}
+ggplot(posts, aes(x = created_at, y = likes_detrended)) +
+  geom_point(position = "jitter") + 
+  stat_smooth(method = "lm") + 
+  labs(x = '', y = '', title = 'Number of Likes Over Time (Detrended)')
+```
+
+There we go. We'll use the `likes_detrended` variable as our dependent variable. First, let's take a look at that one post with a very low number of detrended likes.
+
+```{r}
+# Find lowest scoring post
+posts %>%
+  filter(likes_detrended < -20) %>%
+  arrange(likes_detrended)
+```
+
+The worst one is a video of me playing guitar. :( It brings up a good point that videos may be a different media type altogether -- I believe Instagram shows views instead of likes for those. Let's go ahead and remove the two videos.
+
+```{r}
+# Remove videos
+posts <- posts %>%
+  filter(type != 'video')
+```
+
+
+## Linear regression on detrended data
+Let's fit a linear regression model to this data to try to determine if there are any factors that make a significant influence on the number of likes I get.
+
+```{r}
+# Fit linear regression model
+mod <- lm(likes_detrended ~ hashtags + as.factor(hour) + as.factor(type), data = posts)
+
+# Summarize model
+summary(mod)
+```
+
+Photos of NYC, people, and travel seem to have a significant effect on the number of likes my posts have gotten. Overall, however, the linear regression model does not explain the variance in the number of likes my posts have gotten very well. Hashtags and the hour of day don't seem to have a significant effect on the number of likes. 
+
+The _residual standard error_ is the sum of the square of the residuals, divided by the degrees of freedom. It's similar to the RMSE, except with the number of data rows adjusted.
+
+The F-statistic is used to measure whether the model predicts the outcome better than the constant mode (the mean value of `y`). It doesn't seem like it does very well.
+
+The _multiple R-squared_ is just the R-squared, and the _adjusted R-squared_ is the multiple R-squared penalized by the ratio of the degrees of freedom to the number of training examples. This attemps to correct the fact that more complex models tend to look better on training data due to overfitting.
+
+R-squared can be thought of as what fraction of the y variation is explained by the model.
+
+## Linear regression on trended data
+What if we didn't remove the trend? Would we get different results? We really need to watch out of multicollinearity here.
+
+```{r}
+# Fit linear regression model
+mod2 <- lm(likes ~ hashtags + as.factor(hour) + as.factor(type), data = posts)
+
+# Summarize model
+summary(mod2)
+```
+
+The results are similar, the model still doesn't quite explain the overall variation in the data very well. The independent variables with the biggest influence are similar here to our previous model. Let's stick with our first model.
+
+## Residuals
+Let's put the residuals from our first linear regression model back into the original dataframe.
+
+```{r}
+# Enter predictions
+posts$prediction <- predict(mod, newdata = posts)
+
+# Calculate residuals
+posts <- posts %>%
+  mutate(residual = likes_detrended - prediction)
+```
+
+Cool, now let's plot the distribution of residuals.
+
+```{r, echo = FALSE}
+ggplot(posts) +
+  geom_histogram(aes(x = residual), binwidth = 5, color = 'white') +
+  labs(x = 'Residual', y = 'Count')
+```
+
+Let's look at the updates with the highest residuals (or errors in the predicted number of likes).
+
+```{r}
+# Grab the posts with the biggest errors
+posts %>%
+  filter(abs(residual) > 10) %>%
+  select(id, created_at, text, hashtags, likes, comments, type, residual) %>%
+  arrange(desc(residual))
+```
+
+This was the image with the biggest residual. 
+
+![](http://i.imgur.com/PVkes6y.jpg)
+
+I labeled it as a `travel` post because it was taken in London, however it could have easily been a `people` post. It could also be worth noting that it's a picture of myself. I thought about having `selfie` as a category, under which this could have fallen. Perhaps this is a case of human error - maybe I miscategorized this image!
+
+Let's take a look at another one.
+
+
+![](http://i.imgur.com/ZwZ2ZOm.jpg)
+
+This image only got 24 likes, even though it's an NYC shot that was taken fairly recently. Looking at it now, I realize that I didn't use the "#nyc" hashtag, and overall it doesn't make much sense. It's nice, but maybe not that interesting. I don't really know -- I think it deserves more! :D 
+
+## Conclusions
+This was fun to play around with. I didn't fail to notice the small sample size. In order to get better estimates of the effects that hour of day, hashtags, and image types have, I need to post more frequently and experiment with different combinations.
+
+Based on this small sample, I'd say that images of people and exotic locations, like New York, are probably good. Try to get pictures of people in exotic locations.
+
+Thanks for reading! Leave me thoughts and questions!
+
+
+```{r include = FALSE}
+detach("package:lubridate", unload=TRUE)
+```
+
