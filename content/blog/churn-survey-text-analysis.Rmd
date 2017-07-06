@@ -402,8 +402,104 @@ ggraph(business_graph, layout = "fr") +
 
 There are similar themes in this graph. Users simply aren't using, or don't need, Buffer. Cost is mentioned, as well as refunds. Sprout social is mentioned, as well as set up. Interestingly "come back" and "thank you" are also present. 
 
+## Topic modeling
+In analyzing these survey responses, we feel the urge to group words and responses into natural groups so that we can understand them separately. Topic modeling is a method for unsupervised classification of such documents, similar to clustering on numeric data, which finds natural groups of items even when we’re not sure what we’re looking for.
+
+Latent Dirichlet allocation (LDA) is a particularly popular method for fitting a topic model. It treats each document as a mixture of topics, and each topic as a mixture of words. This allows documents to “overlap” each other in terms of content, rather than being separated into discrete groups, in a way that mirrors typical use of natural language.
+
+LDA is a mathematical method for finding the mixture of words that is associated with each topic, while also determining the mixture of topics that describes each document. 
+
+We can use the `LDA()` function from the `topicmodels` package, setting k = 2, to create a two-topic LDA model.
+
+```{r}
+library(topicmodels); library(tm)
+
+# Create a text corpus
+corpus <- Corpus(VectorSource(text_df$word))
+
+# Created a document term matrix
+dtm <- DocumentTermMatrix(corpus)
+
+# Find the sum of words in each Document
+rowTotals <- apply(dtm , 1, sum) 
+
+# Remove all docs without words
+dtm_new   <- dtm[rowTotals > 0, ]        
+
+inspect(dtm_new)
+```
+
+```{r}
+# Set a seed so that the output of the model is predictable
+lda <- LDA(dtm_new, k = 2, control = list(seed = 1234))
+lda
+```
+
+Now that we've fit the LDA model, the rest of the analysis will involve exploring and interpreting the model using tidying functions from the `tidytext` package.
+
+### Word-topic probabilities
+From the Tidy Text Mining with R book:
+
+> ...the tidy() method, originally from the broom package (Robinson 2017), for tidying model objects. The tidytext package provides this method for extracting the per-topic-per-word probabilities, called  ββ  (“beta”), from the model.
+
+```{r}
+topics <- tidy(lda, matrix = "beta")
+topics
+```
+
+This has turned the model into a one-topic-per-term-per-row format. For each combination, the model computes the probability of that term being generated from that topic.
+
+We could use `dplyr`’s `top_n()` to find the 10 terms that are most common within each topic.
+
+```{r}
+# Find top terms
+lda_top_terms <- topics %>%
+  group_by(topic) %>%
+  top_n(15, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+# Plot the results
+lda_top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+These graphs show the words that are most common in each topic. Notice that there is a lot of overlap -- this is a feature of LDA.
+
+As an alternative, we could consider the terms that had the greatest difference in β between topic 1 and topic 2. This can be estimated based on the log ratio of the two: log2(β2/β1) (a log ratio is useful because it makes the difference symmetrical: β2 being twice as large leads to a log ratio of 1, while β1 being twice as large results in -1). 
+
+To constrain it to a set of especially relevant words, we can filter for relatively common words, such as those that have a  ββ  greater than 1/1000 in at least one topic.
+
+```{r}
+# Find the differences in betas
+beta_spread <- topics %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  spread(topic, beta) %>%
+  filter(topic1 > .001 | topic2 > .001) %>%
+  mutate(log_ratio = log2(topic2 / topic1))
+
+# Plot it out
+beta_spread %>%
+  group_by(log_ratio < 0) %>%
+  top_n(15, abs(log_ratio)) %>%
+  ungroup() %>%
+  mutate(term = reorder(term, log_ratio)) %>%
+  ggplot(aes(term, log_ratio, fill = log_ratio < 0)) +
+  geom_col() +
+  coord_flip() +
+  ylab("Log Odds Ratio") +
+  xlab("") +
+  scale_fill_discrete(name = "", labels = c("Topic 1", "Topic 2"))
+```
+
+To be honest, I can't quite figure out how these words relate to eachother and to a single topic. This method might not be the most useful to us in this particular case.
+
 ## Conclusions
-Based on these Markov chains, it feels important to figure out why users stop using and needing Buffer. In many cases it could be due to external factors like business needs, market forces, layoffs, but in other cases it could be due to Buffer itself. Perhaps Buffer could have a better engagement loop. Or perhaps Buffer could help users that become inactive by suggesting content to share.
+Based on the results of our anlaysis, it feels important to figure out why users stop using and needing Buffer. In many cases it could be due to external factors like business needs, market forces, layoffs, but in other cases it could be due to Buffer itself. Perhaps Buffer could have a better engagement loop. Or perhaps Buffer could help users that become inactive by suggesting content to share.
 
 Another theme that appears repeatedly is cost. We know that the current pricing structure isn't completely ideal, so it feels good to be working towards a more individualized structure over the next few product cycles. 
 
