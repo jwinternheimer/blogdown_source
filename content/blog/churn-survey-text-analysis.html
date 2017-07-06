@@ -1,0 +1,314 @@
+---
+date: 2017-07-05T15:57:50-04:00
+author: Julian Winternheimr
+type: "post"
+tags: []
+title: "Why Users Churn"
+---
+
+
+
+<p>People decide to leave or stop paying for Buffer. It’s unfortunate, but it happens for one reason or another.</p>
+<p>We collect a lot of data from these users in the form of churn surveys. It might be beneficial to analyze the text of these survey comments to see if we can learn anything new.</p>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>The data we’ll use in this analysis comes from <a href="https://looker.buffer.com/looks/3949">this look</a> and will be imported with the <code>get_look()</code> function from the <code>buffer</code> package.</p>
+<pre class="r"><code># Get churn responses
+responses &lt;- get_look(3949)</code></pre>
+<pre><code>## Loading required package: httr</code></pre>
+<p>Now let’s clearn the data a bit.</p>
+<pre class="r"><code># Rename columns
+colnames(responses) &lt;- c(&#39;created_at&#39;, &#39;user_id&#39;, &#39;type&#39;, &#39;reason&#39;, &#39;specifics&#39;, &#39;details&#39;)
+
+# Set strings as character type
+responses$details &lt;- as.character(responses$details)
+
+# Remove the respon and specifics columns
+responses$reason &lt;- NULL
+responses$specifics &lt;- NULL</code></pre>
+<p>Alright, now we’re ready to tidy the data.</p>
+</div>
+<div id="data-tidying" class="section level2">
+<h2>Data tidying</h2>
+<p>Here is some context on the idea of tidy data taken from the book Tidy Text Mining with R:</p>
+<blockquote>
+<p>Using tidy data principles is a powerful way to make handling data easier and more effective, and this is no less true when it comes to dealing with text. As described by Hadley Wickham (Wickham 2014), tidy data has a specific structure: - Each variable is a column - Each observation is a row - Each type of observational unit is a table</p>
+</blockquote>
+<p>We thus define the tidy text format as being a table with one-token-per-row. A token can be a word or an n-gram. Within our tidy text framework, we need to both break the comments into individual tokens and transform it to a tidy data structure. To do this, we use tidytext’s <code>unnest_tokens()</code> function. This breaks the NPS comments into individual words and includes one word per row while retaining the attributes (segment, user_id, etc) of that word.</p>
+<pre class="r"><code># Unnest the tokens
+text_df &lt;- responses %&gt;%
+  unnest_tokens(word, details)</code></pre>
+<p>Now that the data is in one-word-per-row format, we can manipulate it with tidy tools like <code>dplyr</code>. Often in text analysis, we will want to remove stop words; stop words are words that are not useful for an analysis, typically extremely common words such as “the”, “of”, “to”, and so forth in English. We can remove stop words (kept in the tidytext dataset stop_words) with an <code>anti_join()</code>.</p>
+<pre class="r"><code># Collect stop words
+data(stop_words)
+
+# Remove stop words from our dataset with an anti_join()
+text_df &lt;- text_df %&gt;%
+  anti_join(stop_words, by = &quot;word&quot;)</code></pre>
+<p>Great! I think we’ve got a tidy data frame now.</p>
+</div>
+<div id="data-exploration" class="section level2">
+<h2>Data exploration</h2>
+<p>Let’s take a moment here to see the most common words overall from the churn surveys.</p>
+<pre class="r"><code># Find most common words
+text_df %&gt;%
+  count(word, sort = TRUE) %&gt;%
+  filter(n &gt; 100) %&gt;%
+  mutate(word = reorder(word, n)) %&gt;%
+  ggplot(aes(word, n)) +
+  geom_col() +
+  labs(x = &quot;&quot;, y = &quot;&quot;, title = &quot;Most Common Words&quot;) + 
+  coord_flip()</code></pre>
+<p><img src="/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>It’s interesting to see “plan” used so frequently. Words like “post”, “time”, and “facebook” may be possible signals as well. It’s really interesting to see “love” in there as well.</p>
+<p>Ok, now do words occur more frequently in the business churn survey?</p>
+<p>To find this out, we can calculate the relative frequency of words that appear in the business churn survey and compare that to the relative frequency of the words in the other surveys.</p>
+<p><img src="/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>Words that are close to the line in these plots have similar frequencies in both sets of comments. For example, in both the business churn survey and the awesome downgrade survey, “account”, “access”, and “afford” are used frequently.</p>
+<p>Words that are far from the line are words that are found more in one set of comments than another. Words on the left side of the dotted line occur more frequently in the business churn survey’s comments than in the other surveys. For example, in the <code>awesome_downgrade_survey</code> panel, words like “expensive”, “99”, and “analytcs” are much more common in the business churn survey than in the awesome survey.</p>
+</div>
+<div id="analyzing-word-frequency" class="section level2">
+<h2>Analyzing word frequency</h2>
+<p>It may be useful to also see words that appear more frequently for certain segments of users. To do that, we can a term’s <em>inverse document frequency (tdf)</em>, defined as:</p>
+<p><code>idf(term) = ln(documents / documents containing term)</code></p>
+<blockquote>
+<p>The statistic tf-idf is intended to measure how important a word is to a document in a collection (or corpus) of documents, for example, to one novel in a collection of novels or to one website in a collection of websites.</p>
+</blockquote>
+<p>Let’s calculate the term frequencies in our surveys for each segment of responders.</p>
+<pre class="r"><code># Calculate the frequency of words for each segment
+segment_words &lt;- text_df %&gt;%
+  count(type, word, sort = TRUE) %&gt;%
+  ungroup()
+
+# Calculate the total number of words for each segment
+total_words &lt;- segment_words %&gt;% 
+  group_by(type) %&gt;% 
+  summarize(total = sum(n))
+
+# Join the total words back into the segment_words data frame
+segment_words &lt;- left_join(segment_words, total_words, by = &quot;type&quot;) %&gt;%
+  filter(type != &quot;&quot;)
+
+# View data 
+head(segment_words)</code></pre>
+<pre><code>## # A tibble: 6 x 4
+##                       type    word     n total
+##                     &lt;fctr&gt;   &lt;chr&gt; &lt;int&gt; &lt;int&gt;
+## 1 awesome_downgrade_survey  buffer   440 11297
+## 2 awesome_downgrade_survey  social   259 11297
+## 3 awesome_downgrade_survey    plan   234 11297
+## 4 awesome_downgrade_survey   media   192 11297
+## 5 awesome_downgrade_survey service   192 11297
+## 6 awesome_downgrade_survey    time   184 11297</code></pre>
+<p>There is one row in this data frame for each word-segment combination. <code>n</code> is the number of times that word is used for that segment and total is the total number of words in the segment’s comments. ## The <code>bind_tf_idf</code> function The idea of tf-idf is to find the important words for the content of each collection of comments by decreasing the weight for commonly used words and increasing the weight for words that are not used very much in an entire collection of documents, in this case all NPS comments.</p>
+<blockquote>
+<p>Calculating tf-idf attempts to find the words that are important (i.e., common) in a text, but not too common.</p>
+</blockquote>
+<p>The <code>bind_tf_idf</code> function takes a tidy text dataset as input with one row per token (term), per document. One column (<code>word</code> here) contains the terms/tokens, one column contains the documents (<code>segment</code> here), and the last necessary column contains the counts, how many times each document contains each term (<code>n</code>).</p>
+<pre class="r"><code># Calculate tf_idf
+segment_words &lt;- segment_words %&gt;%
+  bind_tf_idf(word, type, n)
+
+segment_words</code></pre>
+<pre><code>## # A tibble: 4,717 x 7
+##                        type     word     n total         tf       idf
+##                      &lt;fctr&gt;    &lt;chr&gt; &lt;int&gt; &lt;int&gt;      &lt;dbl&gt;     &lt;dbl&gt;
+##  1 awesome_downgrade_survey   buffer   440 11297 0.03894839 0.2231436
+##  2 awesome_downgrade_survey   social   259 11297 0.02292644 0.2231436
+##  3 awesome_downgrade_survey     plan   234 11297 0.02071346 0.2231436
+##  4 awesome_downgrade_survey    media   192 11297 0.01699566 0.2231436
+##  5 awesome_downgrade_survey  service   192 11297 0.01699566 0.2231436
+##  6 awesome_downgrade_survey     time   184 11297 0.01628751 0.2231436
+##  7 awesome_downgrade_survey    posts   180 11297 0.01593343 0.2231436
+##  8 awesome_downgrade_survey     post   177 11297 0.01566788 0.2231436
+##  9              exit_survey  account   163  3747 0.04350147 0.2231436
+## 10 awesome_downgrade_survey business   146 11297 0.01292379 0.2231436
+## # ... with 4,707 more rows, and 1 more variables: tf_idf &lt;dbl&gt;</code></pre>
+<p>The <code>idf</code> and <code>tf_idf</code> will be 0 for extremely common words like “the” and “a”. We’ve already removed these stop words from our dataset.</p>
+<p>Let’s look at words with high <code>tf_idf</code> values.</p>
+<pre class="r"><code># Look at high tf_idf value words
+segment_words %&gt;%
+  select(-total) %&gt;%
+  arrange(desc(tf_idf))</code></pre>
+<pre><code>## # A tibble: 4,717 x 6
+##                                 type       word     n          tf
+##                               &lt;fctr&gt;      &lt;chr&gt; &lt;int&gt;       &lt;dbl&gt;
+##  1 business_downgrade_awesome_survey       plan    26 0.048417132
+##  2                       exit_survey    account   163 0.043501468
+##  3                       exit_survey       page    37 0.009874566
+##  4                       exit_survey  instagram    66 0.017614091
+##  5          awesome_downgrade_survey     buffer   440 0.038948393
+##  6 business_downgrade_awesome_survey   business    20 0.037243948
+##  7             business_churn_survey     buffer    48 0.034557235
+##  8                       exit_survey     buffer   120 0.032025620
+##  9 business_downgrade_awesome_survey comparison     2 0.003724395
+## 10 business_downgrade_awesome_survey       jump     2 0.003724395
+## # ... with 4,707 more rows, and 2 more variables: idf &lt;dbl&gt;, tf_idf &lt;dbl&gt;</code></pre>
+<p>Now let’s visualize these high <code>tf_idf</code> words for each segment of responders.</p>
+<p><img src="/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>The words that appear in these graphs appear more frequently in the specific survey type than they do in the other surveys. I think we can ignore “buffer”. The word “plan” seems to appear often in each survey <em>except</em> the exit survey as well.</p>
+<p>It seems competitors are mentioned most frequently in the business churn survey. We don’t have much context and are required to speculate on what the meaning and emotion behind the words might be.</p>
+<p>It may be beneficial to look at groups of words to help us gather more information. :)</p>
+</div>
+<div id="n-grams" class="section level2">
+<h2>N-grams</h2>
+<p>What if we looked at groups of words instead of just single words? We can check which words tend to appear immediately after another, and which words tend to appear together in the same document.</p>
+<p>We’ve been using the <code>unnest_tokens</code> function to tokenize by word, but we can also use the function to tokenize into consecutive sequences of words, called n-grams. By seeing how often word X is followed by word Y, we can then build a model of the relationships between them.</p>
+<p>We do this by adding the <code>token = &quot;ngrams&quot;</code> option to <code>unnest_tokens()</code>, and setting <code>n</code> to the number of words we wish to capture in each n-gram. When we set <code>n</code> to 2, we are examining groups of 2 consecutive words, often called “bigrams”:</p>
+<pre class="r"><code># Unnest bigrams from responses
+bigrams &lt;- responses %&gt;%
+  unnest_tokens(bigram, details, token = &quot;ngrams&quot;, n = 2)
+
+# View the bigrams
+head(bigrams$bigram)</code></pre>
+<pre><code>## [1] &quot;not using&quot;         &quot;using anymore&quot;     &quot;my marketing&quot;     
+## [4] &quot;marketing manager&quot; &quot;manager has&quot;       &quot;has a&quot;</code></pre>
+<p>Great! Each token now is represented by a bigram. Let’s take a quick look at the most common bigrams</p>
+<pre class="r"><code># Count the most common bigrams
+bigrams %&gt;%
+  count(bigram, sort = TRUE)</code></pre>
+<pre><code>## # A tibble: 21,784 x 2
+##          bigram     n
+##           &lt;chr&gt; &lt;int&gt;
+##  1 social media   243
+##  2    not using   241
+##  3     using it   212
+##  4      i don&#39;t   209
+##  5         i am   195
+##  6    no longer   172
+##  7       use it   163
+##  8   don&#39;t need   154
+##  9       i have   153
+## 10      need to   149
+## # ... with 21,774 more rows</code></pre>
+<p>As we might expect, a lot of the most common bigrams are groups of common words. This is a useful time to use tidyr’s <code>separate()</code>, which splits a column into multiple based on a delimiter. This lets us separate it into two columns, “word1” and “word2”, at which point we can remove cases where either is a stop-word.</p>
+<pre class="r"><code># Separate words in bigrams
+separated &lt;- bigrams %&gt;%
+  separate(bigram, c(&quot;word1&quot;, &quot;word2&quot;), sep = &quot; &quot;)
+
+# Define our own stop words
+word &lt;- c(&quot;i&quot;, &quot;i&#39;m&quot;, &quot;it&quot;, &quot;the&quot;, &quot;at&quot;, &quot;to&quot;, &quot;right&quot;, &quot;just&quot;, &quot;to&quot;, &quot;a&quot;, &quot;an&quot;,
+          &quot;that&quot;, &quot;but&quot;, &quot;as&quot;, &quot;so&quot;, &quot;will&quot;, &quot;for&quot;, &quot;longer&quot;, &quot;i&#39;ll&quot;, &quot;of&quot;, &quot;my&quot;,
+          &quot;n&quot;, &quot;do&quot;, &quot;did&quot;, &quot;am&quot;, &quot;with&quot;, &quot;been&quot;, &quot;and&quot;, &quot;we&quot;)
+
+# Create tibble of stop words
+stopwords &lt;- tibble(word)
+
+# Filter out stop-words
+filtered &lt;- separated %&gt;%
+  filter(!word1 %in% stopwords$word) %&gt;%
+  filter(!word2 %in% stopwords$word)
+
+# Calculate new bigram counts
+bigram_counts &lt;- filtered %&gt;% 
+  count(word1, word2, sort = TRUE)
+
+bigram_counts</code></pre>
+<pre><code>## # A tibble: 13,113 x 3
+##      word1  word2     n
+##      &lt;chr&gt;  &lt;chr&gt; &lt;int&gt;
+##  1  social  media   243
+##  2     not  using   241
+##  3   don&#39;t   need   154
+##  4      be   back   135
+##  5   don&#39;t    use   103
+##  6 awesome   plan    96
+##  7   thank    you    85
+##  8   using buffer    75
+##  9    love buffer    69
+## 10   don&#39;t   have    66
+## # ... with 13,103 more rows</code></pre>
+<p>In other analyses, we may want to work with the recombined words. tidyr’s <code>unite()</code> function is the inverse of separate(), and lets us recombine the columns into one.</p>
+<pre class="r"><code># Reunite the words
+bigrams_united &lt;- filtered %&gt;%
+  unite(bigram, word1, word2, sep = &quot; &quot;)
+
+head(bigrams_united$bigram)</code></pre>
+<pre><code>## [1] &quot;not using&quot;         &quot;using anymore&quot;     &quot;marketing manager&quot;
+## [4] &quot;manager has&quot;       &quot;buffer account&quot;    &quot;account therefore&quot;</code></pre>
+<p>Nice! Let’s look at the most common bigrams.</p>
+<pre class="r"><code># Find most common bigrams
+bigrams_united %&gt;%
+  count(bigram, sort = TRUE)</code></pre>
+<pre><code>## # A tibble: 13,113 x 2
+##          bigram     n
+##           &lt;chr&gt; &lt;int&gt;
+##  1 social media   243
+##  2    not using   241
+##  3   don&#39;t need   154
+##  4      be back   135
+##  5    don&#39;t use   103
+##  6 awesome plan    96
+##  7    thank you    85
+##  8 using buffer    75
+##  9  love buffer    69
+## 10   don&#39;t have    66
+## # ... with 13,103 more rows</code></pre>
+<p>A bigram can also be treated as a term in a document in the same way that we treated individual words. For example, we can look at the tf-idf of these trigrams across the surveys. These tf-idf values can be visualized within each segment, just as we did for words earlier.</p>
+<p><img src="/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
+<p>I’m seeing a lot of people just not using or not needing Buffer.</p>
+<p>We may want to visualize the relationship between these bigrams, instead of just listing the most common ones.</p>
+</div>
+<div id="visualizing-a-network-of-bigrams-with-ggraph" class="section level2">
+<h2>Visualizing a network of bigrams with ggraph</h2>
+<p>As one common visualization, we can arrange the words into a network, or “graph.” Here we’ll be referring to a “graph” not in the sense of a visualization, but as a combination of connected nodes. A graph can be constructed from a tidy object since it has three variables:</p>
+<ul>
+<li>from: the node an edge is coming from</li>
+<li>to: the node an edge is going towards</li>
+<li>weight: A numeric value associated with each edge</li>
+</ul>
+<p>The <code>igraph</code> package has many powerful functions for manipulating and analyzing networks. One way to create an igraph object from tidy data is the <code>graph_from_data_frame()</code> function, which takes a data frame of edges with columns for “from”, “to”, and edge attributes (in this case n):</p>
+<pre class="r"><code>library(igraph)
+
+# Original counts
+bigram_counts</code></pre>
+<pre><code>## # A tibble: 13,113 x 3
+##      word1  word2     n
+##      &lt;chr&gt;  &lt;chr&gt; &lt;int&gt;
+##  1  social  media   243
+##  2     not  using   241
+##  3   don&#39;t   need   154
+##  4      be   back   135
+##  5   don&#39;t    use   103
+##  6 awesome   plan    96
+##  7   thank    you    85
+##  8   using buffer    75
+##  9    love buffer    69
+## 10   don&#39;t   have    66
+## # ... with 13,103 more rows</code></pre>
+<p>Let’s create a bigram graph object.</p>
+<pre class="r"><code># filter for only relatively common combinations
+bigram_graph &lt;- bigram_counts %&gt;%
+  filter(n &gt; 25) %&gt;%
+  graph_from_data_frame()
+
+bigram_graph</code></pre>
+<pre><code>## IGRAPH DN-- 36 31 -- 
+## + attr: name (v/c), n (e/n)
+## + edges (vertex names):
+##  [1] social  -&gt;media     not     -&gt;using     don&#39;t   -&gt;need     
+##  [4] be      -&gt;back      don&#39;t   -&gt;use       awesome -&gt;plan     
+##  [7] thank   -&gt;you       using   -&gt;buffer    love    -&gt;buffer   
+## [10] don&#39;t   -&gt;have      too     -&gt;expensive buffer  -&gt;is       
+## [13] use     -&gt;buffer    come    -&gt;back      you     -&gt;guys     
+## [16] this    -&gt;time      your    -&gt;service   is      -&gt;not      
+## [19] more    -&gt;than      is      -&gt;great     business-&gt;plan     
+## [22] be      -&gt;able      can&#39;t   -&gt;afford    it&#39;s    -&gt;not      
+## + ... omitted several edges</code></pre>
+<p>We can convert an igraph object into a ggraph with the ggraph function, after which we add layers to it, much like layers are added in ggplot2. For example, for a basic graph we need to add three layers: nodes, edges, and text.</p>
+<p><img src="/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
+<p>We can use this graph to visualize some details about the text structure. For example, we can see that “buffer”, “customer”, “media”, and “time” form the centers of groups of nodes. We also see pairs or triplets along the outside that form common short phrases (“reasonable price”, “calendar view”, or “free version”).</p>
+<p>Let’s add some polish to this graph that might make it easier to interpret.</p>
+<p><img src="/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-23-1.png" width="672" /></p>
+<p>This is a visualization of a <strong>Markov chain</strong>, a model in text processing. In a Markov chain, each choice of word depends only on the previous word. In this case, a random generator following this model might spit out “buffer”, then “is”, then “great”, by following each word to the most common words that follow it. To make the visualization interpretable, I chose to show only the most common word to word connections. What can we learn from this graph?</p>
+<p>I see that “don’t” is at the center of a cluster of nodes. These include the phrases “don’t need”, “don’t use”, and “don’t have”. There are also isolated clusters referencing the cost, e.g. “can’t afford” and “too expensive”. There is also a cluster referring to users that will come back.</p>
+<p>What would this graph look like if we only looked at the responses of the <em>business</em> churn survey?</p>
+<p><img src="/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-24-1.png" width="672" /></p>
+<p>There are similar themes in this graph. Users simply aren’t using, or don’t need, Buffer. Cost is mentioned, as well as refunds. Sprout social is mentioned, as well as set up. Interestingly “come back” and “thank you” are also present.</p>
+</div>
+<div id="conclusions" class="section level2">
+<h2>Conclusions</h2>
+<p>Based on these Markov chains, it feels important to figure out why users stop using and needing Buffer. In many cases it could be due to external factors like business needs, market forces, layoffs, but in other cases it could be due to Buffer itself. Perhaps Buffer could have a better engagement loop. Or perhaps Buffer could help users that become inactive by suggesting content to share.</p>
+<p>Another theme that appears repeatedly is cost. We know that the current pricing structure isn’t completely ideal, so it feels good to be working towards a more individualized structure over the next few product cycles.</p>
+<p>There is a general theme of gratitude in these responses - “i love buffer” was a common phrase that appeared often in each survey. It’s comforting to know that people like the product and team – I hope that we’ll be able to use some of these learnings to give them a better experience. :)</p>
+</div>
