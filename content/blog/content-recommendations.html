@@ -19,6 +19,14 @@ title: "Simple Content Recommendations in R"
 <li><p><strong>Item-based</strong>: This recommends to a user the items that are most similar to the user’s purchases.</p></li>
 <li><p><strong>User-based</strong>: This recommends to a user the items that are the most preferred by similar users.</p></li>
 </ul>
+<p>In this analysis we’ll use <em>user-based</em> collaborative filtering. With this method, ratings (or recommendations) for a user can be predicted by first finding a neighborhood of similar users and then aggregate the ratings of these users to form a prediction.</p>
+<p>The big disadvantage of this approach is scalability since the whole user database has to be processed. This is why we’re starting with a small dataset.</p>
+<p>The neighborhood is defined in terms of similarity between users, either by taking a given number of most similar users (k nearest neighbors) or all users within a given similarity threshold. Popular similarity measures for CF are the Pearson correlation coefficient and the Cosine similarity.</p>
+<p>We want to create recommendations for people based on the preferences of people with similar interests. To find the k-neighborhood (i.e., the k nearest neighbors) we calculate the similarity between the user and all other users based on their ratings (1 for a shared url, 0 otherwise) in the dataset and then select the k users with the highest similarity.</p>
+<div class="figure">
+<img src="http://i.imgur.com/h0NvZvY.png" />
+
+</div>
 </div>
 <div id="data-mining-and-eda" class="section level3">
 <h3>Data mining and EDA</h3>
@@ -55,7 +63,22 @@ updates &lt;- updates %&gt;%
 <div id="recommender" class="section level2">
 <h2>Recommender</h2>
 <p>The <code>recommenderlab</code> package can be used for collaborative filtering. To get started, we need to change the structure of our dataset to a wide matrix, which columns representing urls and rows representing users.</p>
-<p>Our data is binary (i.e. either 1 or 0). If a user shared the url, then it’s a 1, otherwise it’s 0. We’ll use the <code>reshape2</code> package to restructure the data.</p>
+<p>Our data is binary (i.e. either 1 or 0). If a user shared the url, then it’s a 1, otherwise it’s 0. Recommender systems using association rules produce recommendations based on a dependency model for items given by a set of association rules.</p>
+<p>The binary profile matrix <code>R</code> is seen as a dataset where each user is treated as a transaction that contains the subset of items in <em>I</em> with a rating of 1 (when the user has shared the link). Hence transaction <em>k</em> is defined as <code>Tk = {ij ∈ I|rjk = 1}</code>, which indicates whether a link is an element of <em>I</em> or the rating of that specific link is 1.</p>
+<p>The whole transaction dataset <code>D = {T1, T2, . . . , TU }</code> where U is the number of users. This is a wide matrix that we have to build, that includes a rating for each user and each link.</p>
+<p>To build the dependency model, a set of association rules is mined from the matrix. Association rules are rules of the form <code>X → Y</code> where <code>X , Y ⊆ I</code> and <code>X ∩ Y = ∅.</code> This means that the links <code>X</code> and <code>Y</code> are a subset of the entire list of links <code>I</code> and the intersection of <code>X</code> and <code>Y</code> is 0 (the user hasn’t shared both).</p>
+<p>To select a set of useful association rules, thresholds on measures of significance and interestingness are used. Two widely applied measures are:</p>
+<ul>
+<li><p><code>support(X → Y) = support(X ∪ Y) = Freq(X ∪ Y)/|D| = P(EX ∩ EY )</code></p></li>
+<li><p><code>confidence(X → Y) = support(X ∪ Y)/support(X ) = P(EY |EX )</code></p></li>
+</ul>
+<p><code>Freq(I)</code> gives the number of transactions in the data base <code>D</code> that contains all items in <code>I</code>. <code>EX</code> is the event that the item X is contained in a transaction. So <code>support(X → Y)</code> is the probability that link X <em>or</em> link Y is shared, and <code>confidence(X → Y)</code> is the probability that link Y is shared <em>given that link X was shared</em>.</p>
+<p>To make a recommendation for an active user ua given the set of items <code>I</code> the user likes and the set of association rules <code>R</code> (dependency model), the following steps are necessary:</p>
+<ol style="list-style-type: decimal">
+<li>Find all matching rules <code>X → Y</code>.</li>
+<li>Recommend N unique right-hand-sides (Y) of the matching rules with the highest con-fidence (or another measure of interestingness).</li>
+</ol>
+<p>Let’s build our binary profile matrix.</p>
 <pre class="r"><code># Cast as a giant matrix
 updates_cast &lt;- acast(updates, name ~ clean_url)
 umatrix &lt;- as.matrix(updates_cast)
@@ -82,6 +105,7 @@ binary_matrix</code></pre>
 <li>Hybrid recommendations (HybridRecommender)</li>
 </ul>
 <p>We’ll use the <code>UBCF</code> algorithm in this analysis, and we won’t use the best practices of splitting the data into training and testing sets. We’ll only use the eyeball test to evaluate the model’s performance.</p>
+<p>To generate an aggregated estimated rating, we compute the average ratings in the neighborhood for each url not shared by the user. To create a top-N recommendation list, the urls are ordered by predicted rating. The fact that some users in the neighborhood are more similar to the active user than others can be incorporated as weights.</p>
 <pre class="r"><code># Build user-based collaborative filtering recommender
 recommender &lt;- Recommender(binary_matrix, method = &quot;UBCF&quot;)
 
