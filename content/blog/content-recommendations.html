@@ -1,0 +1,959 @@
+---
+date: 2017-07-07T10:01:22-04:00
+author: Julian Winternheimr
+type: "post"
+tags: []
+title: "Simple Content Recommendations in R"
+---
+
+
+
+<p>I’ve wanted to build a content recommendation engine for a long time. Buffer is sitting on a mountain of data, which some argue is <a href="http://subprint.com/blog/data-is-the-most-valuable-commodity-on-earth">the most valuable commodity on Earth</a>. We used to provide content suggestions to users through manual curation, but <a href="https://open.buffer.com/retiring-suggestions/">we ended up retiring that feature/service</a>.</p>
+<p>In this analysis we’ll build a simple recommendation engine with the <code>recommenderlab</code> R package, using collaborative filtering techniques. To keep it simple, we’ll only look at updates shared by Buffer team members.</p>
+<div id="collaborative-filtering" class="section level3">
+<h3>Collaborative filtering</h3>
+<p>The basic idea behind collaborative filtering is that, if two people share similar interests (e.g. they’ve shared the same links), they will also share the same similar interests in the future. For example, if Rupert and I have similar histories in terms of the links that we’ve shared, it would make sense to suggests links that Rupert has shared (that I haven’t) to me.</p>
+<p>In this type of recommendation, ltering items from a large set of alternatives is done collaboratively between users preferences. Such systems are called collaborative ltering recommender systems.</p>
+<p>There are two sub-branches of collaborative filtering that are worth mentioning:</p>
+<ul>
+<li><strong>Item-based</strong>: This recommends to a user the items that are most similar to the user’s purchases.</li>
+<li><strong>User-based</strong>: This recommends to a user the items that are the most preferred by similar users.</li>
+</ul>
+</div>
+<div id="data-mining-and-eda" class="section level3">
+<h3>Data mining and EDA</h3>
+<p>It’s worth noting that I’m not doing any exploratory analysis in this analysis. It’s Friday and I’m getting a little lazy. :) However this should absolutely be done at some point to give us a better underlying understanding of the dataset.</p>
+</div>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>Let’s collect all of the links shared by Buffer team members. The dataset will only include two columns, <code>name</code> and <code>url</code>.</p>
+<pre class="r"><code># Read csv of updates
+updates &lt;- read.csv(&quot;~/Downloads/buffer_updates.csv&quot;, header = TRUE)</code></pre>
+<p>Alright, we have 98 thousand links from 72 team members!</p>
+</div>
+<div id="data-tidying" class="section level2">
+<h2>Data tidying</h2>
+<p>We need to clean up the column names and set the correct object types.</p>
+<pre class="r"><code># Rename the columns
+colnames(updates) &lt;- c(&#39;name&#39;, &#39;url&#39;)
+
+# Set urls as character vector
+updates$url &lt;- as.character(updates$url)</code></pre>
+<p>Now we need to clean up the links. We’ll use the <code>gsub()</code> function and some regex to remove all characters after <code>?</code> in the urls.</p>
+<pre class="r"><code>updates$clean_url &lt;- gsub(&quot;\\?.*&quot;, &quot;&quot;, updates$url)</code></pre>
+<p>Nice. There are still some unique urls that we’d like to remove. We can do that manually.</p>
+<pre class="r"><code># Define the urls we want to exclude
+problem_urls &lt;- c(&quot;nytimes.com/glogin&quot;, &quot;buffer.com&quot;, &quot;buffer.com/respond&quot;, &quot;nytimes.com&quot;,
+                  &quot;facebook.com/photo.php&quot;, &quot;myaccount.nytimes.com/auth/login&quot;, &quot;google.com&quot;,
+                  &quot;bufferapp.com&quot;, &quot;news.ycombinator.com/item&quot;)
+
+# Filter out these urls
+updates &lt;- updates %&gt;%
+  filter(!(clean_url %in% problem_urls))</code></pre>
+<p>Alright, now we’re ready to build our recommender!</p>
+</div>
+<div id="recommender" class="section level2">
+<h2>Recommender</h2>
+<p>The <code>recommenderlabd</code> package can be used for collaborative filtering. To get started, we need to change the structure of our dataset to a wide matrix, which columns representing urls and rows representing users.</p>
+<p>Our data is binary (i.e. either 1 or 0). If a user shared the url, then it’s a 1, otherwise it’s 0. We’ll use the <code>reshape2</code> package to restructure the data.</p>
+<pre class="r"><code># Cast as a giant matrix
+updates_cast &lt;- acast(updates, name ~ clean_url)
+umatrix &lt;- as.matrix(updates_cast)
+
+# Set as a binary rating matrix
+binary_matrix = as(umatrix, &#39;binaryRatingMatrix&#39;)
+
+binary_matrix</code></pre>
+<pre><code>## 72 x 78203 rating matrix of class &#39;binaryRatingMatrix&#39; with 94900 ratings.</code></pre>
+<p>We now have a 72 by 78203 matrix that we can work with.</p>
+<p>The package comes with a lot of nifty built-in algorithms that can be used for both rating (e.g. 1-5 starts) and binary (0 or 1) data sets. The supported algoritms are:</p>
+<ul>
+<li>User-based collborative filtering (UBCF)</li>
+<li>Item-based collborative filtering (IBCF)</li>
+<li>SVD with column-mean imputation (SVD)</li>
+<li>Funk SVD (SVDF)</li>
+<li>Association rule-based recommender (AR)</li>
+<li>Popular items (POPULAR)</li>
+<li>Randomly chosen items for comparison (RANDOM)</li>
+<li>Re-recommend liked items (RERECOMMEND)</li>
+<li>Hybrid recommendations (HybridRecommender)</li>
+</ul>
+<p>We’ll use the <code>UBCF</code> algorithm in this small analysis, and we won’t use the best practices of splitting the data into training and testing sets. We’ll only use the eyeball test to evaluate the model’s performance.</p>
+<pre class="r"><code># Build user-based collaborative filtering recommender
+recommender &lt;- Recommender(binary_matrix, method = &quot;UBCF&quot;)
+
+# Make top 10 recommendation list for each user
+predictions &lt;- predict(recommender, binary_matrix, type = &quot;topNList&quot;)</code></pre>
+<p>Great, now let’s convert the predictions to a list and view the results!</p>
+<pre class="r"><code># Convert prediction into list, user-wise
+pred_list &lt;- as(predictions, &quot;list&quot;)
+pred_list</code></pre>
+<pre><code>## $`Adam Farmer`
+##  [1] &quot;open.buffer.com/product&quot;                                                                                  
+##  [2] &quot;blog.bufferapp.com/social-media-2016&quot;                                                                     
+##  [3] &quot;blog.bufferapp.com/new-social-media-tools-2017&quot;                                                           
+##  [4] &quot;medium.com/m/global-identity&quot;                                                                             
+##  [5] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+##  [6] &quot;open.buffer.com/pablo-startup-within-a-startup&quot;                                                           
+##  [7] &quot;open.buffer.com/diversity-in-technology&quot;                                                                  
+##  [8] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                                     
+##  [9] &quot;open.buffer.com/buffer-beta-program&quot;                                                                      
+## [10] &quot;open.buffer.com/stop-energy&quot;                                                                              
+## 
+## $`Adnan Issadeen`
+##  [1] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;
+##  [2] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;   
+##  [3] &quot;medium.com/m/global-identity&quot;                                           
+##  [4] &quot;open.buffer.com/transparent-product-roadmap&quot;                            
+##  [5] &quot;open.buffer.com/remote-working-rv-part-one&quot;                             
+##  [6] &quot;open.buffer.com/product&quot;                                                
+##  [7] &quot;open.buffer.com/equal-pay&quot;                                              
+##  [8] &quot;buffer.com/journey&quot;                                                     
+##  [9] &quot;open.buffer.com/stop-energy&quot;                                            
+## [10] &quot;buffer.com/respond/blog/social-media-customer-service&quot;                  
+## 
+## $`Alfred Lua`
+##  [1] &quot;open.buffer.com/27-question-to-ask-instead-of-what-do-you-do&quot;             
+##  [2] &quot;blog.bufferapp.com/free-image-sources-list&quot;                               
+##  [3] &quot;buffer.com/2016&quot;                                                          
+##  [4] &quot;blog.bufferapp.com/10-scientifically-proven-ways-to-make-yourself-happier&quot;
+##  [5] &quot;blog.bufferapp.com/how-to-create-manage-facebook-business-page&quot;           
+##  [6] &quot;open.buffer.com/pablo-startup-within-a-startup&quot;                           
+##  [7] &quot;producthunt.com/tech/customer-support-academy&quot;                            
+##  [8] &quot;blog.bufferapp.com/best-time-to-tweet-research&quot;                           
+##  [9] &quot;blog.bufferapp.com/social-media-marketing-resources-kit&quot;                  
+## [10] &quot;open.buffer.com/stop-energy&quot;                                              
+## 
+## $Andrew
+##  [1] &quot;blog.bufferapp.com/7-vital-statistics-to-help-with-your-linkedin-marketing-strategy&quot;       
+##  [2] &quot;open.bufferapp.com/transparent-pricing-buffer&quot;                                             
+##  [3] &quot;open.bufferapp.com/buffer-distributed-team-how-we-work&quot;                                    
+##  [4] &quot;blog.bufferapp.com/10-scientifically-proven-ways-to-make-yourself-happier&quot;                 
+##  [5] &quot;open.bufferapp.com/raising-3-5m-funding-valuation-term-sheet&quot;                              
+##  [6] &quot;blog.bufferapp.com/a-complete-guide-to-creating-awesome-visual-content&quot;                    
+##  [7] &quot;blog.bufferapp.com/best-social-media-tools-for-small-business&quot;                             
+##  [8] &quot;blog.bufferapp.com/the-most-popular-words-in-most-viral-headlines&quot;                         
+##  [9] &quot;blog.bufferapp.com/how-to-measure-progress-in-your-personal-goals-daily-weekly-and-monthly&quot;
+## [10] &quot;blog.bufferapp.com/the-science-of-colors-in-marketing-why-is-facebook-blue&quot;                
+## 
+## $`Arielle Tannenbaum`
+##  [1] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                              
+##  [2] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                                 
+##  [3] &quot;open.buffer.com/product&quot;                                                                                  
+##  [4] &quot;open.buffer.com/holidays-international-startup&quot;                                                           
+##  [5] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+##  [6] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                  
+##  [7] &quot;open.buffer.com/pablo-startup-within-a-startup&quot;                                                           
+##  [8] &quot;soundcloud.com/bufferapp/radical-culture-episode-one&quot;                                                     
+##  [9] &quot;open.buffer.com/buffer-beta-program&quot;                                                                      
+## [10] &quot;medium.com/m/global-identity&quot;                                                                             
+## 
+## $`Åsa Nyström`
+##  [1] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                      
+##  [2] &quot;buffer.com/journey&quot;                                                                             
+##  [3] &quot;blog.bufferapp.com/the-science-of-colors-in-marketing-why-is-facebook-blue&quot;                     
+##  [4] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                               
+##  [5] &quot;blog.bufferapp.com/10-scientifically-proven-ways-to-make-yourself-happier&quot;                      
+##  [6] &quot;open.bufferapp.com/blending-work-and-life-what-remote-work-looks-like-for-families-and-partners&quot;
+##  [7] &quot;blog.bufferapp.com/how-to-measure-progress-in-your-personal-goals-daily-weekly-and-monthly&quot;     
+##  [8] &quot;open.buffer.com/product&quot;                                                                        
+##  [9] &quot;timezone.io/team/buffer&quot;                                                                        
+## [10] &quot;open.bufferapp.com/transparent-pricing-buffer&quot;                                                  
+## 
+## $`Ash Read`
+##  [1] &quot;open.buffer.com/transparent-product-roadmap&quot;                 
+##  [2] &quot;blog.bufferapp.com/social-media-analytics-tools&quot;             
+##  [3] &quot;open.buffer.com/keep-going&quot;                                  
+##  [4] &quot;open.buffer.com/product&quot;                                     
+##  [5] &quot;open.buffer.com/diversity-in-technology&quot;                     
+##  [6] &quot;open.buffer.com/27-question-to-ask-instead-of-what-do-you-do&quot;
+##  [7] &quot;open.buffer.com/stop-energy&quot;                                 
+##  [8] &quot;blog.bufferapp.com/social-media-marketing-resources-kit&quot;     
+##  [9] &quot;open.buffer.com/top-words-of-buffer&quot;                         
+## [10] &quot;open.buffer.com/buffer-acquires-respondly&quot;                   
+## 
+## $`Bonnie Porter Huggins`
+##  [1] &quot;open.buffer.com/stop-energy&quot;                                                                                            
+##  [2] &quot;open.buffer.com/feedback&quot;                                                                                               
+##  [3] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                                                   
+##  [4] &quot;open.buffer.com/holidays-international-startup&quot;                                                                         
+##  [5] &quot;open.buffer.com/pricing-2016&quot;                                                                                           
+##  [6] &quot;open.buffer.com/work-less&quot;                                                                                              
+##  [7] &quot;blog.bufferapp.com/social-media-2016&quot;                                                                                   
+##  [8] &quot;open.buffer.com/buffer-beta-program&quot;                                                                                    
+##  [9] &quot;open.buffer.com/why-startups-are-so-hard-the-future-of-buffer-and-my-biggest-mistake-so-far-tweets-from-my-airplane-ama&quot;
+## [10] &quot;blog.bufferapp.com/facebook-reactions&quot;                                                                                  
+## 
+## $`Boris Troja`
+##  [1] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+##  [2] &quot;open.buffer.com/buffer-beta-program&quot;                                                                      
+##  [3] &quot;buffer.com/2016&quot;                                                                                          
+##  [4] &quot;open.buffer.com/27-question-to-ask-instead-of-what-do-you-do&quot;                                             
+##  [5] &quot;open.buffer.com/top-words-of-buffer&quot;                                                                      
+##  [6] &quot;open.buffer.com/equal-pay&quot;                                                                                
+##  [7] &quot;about.gitlab.com/2017/03/14/buffer-and-gitlab-ceos-talk-transparency&quot;                                     
+##  [8] &quot;open.buffer.com/transparent-salaries&quot;                                                                     
+##  [9] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                                         
+## [10] &quot;blog.bufferapp.com/facebook-reactions&quot;                                                                    
+## 
+## $`Brian Peters`
+##  [1] &quot;open.buffer.com/buffer-acquires-respondly&quot;   
+##  [2] &quot;kickstarter.com/projects/kevanlee/gone-ahead&quot;
+##  [3] &quot;open.buffer.com/transparency-timeline&quot;       
+##  [4] &quot;buffer.com/bufferchat&quot;                       
+##  [5] &quot;open.buffer.com/remote-working-rv-part-one&quot;  
+##  [6] &quot;open.buffer.com/starting-buffer-diary&quot;       
+##  [7] &quot;blog.bufferapp.com/social-media-calendar&quot;    
+##  [8] &quot;open.buffer.com/growth&quot;                      
+##  [9] &quot;forbes.com/forbes/welcome&quot;                   
+## [10] &quot;open.buffer.com/remote-work-retreat&quot;         
+## 
+## $`Carolyn Kopprasch`
+##  [1] &quot;open.bufferapp.com/buffer-distributed-team-how-we-work&quot;                                                   
+##  [2] &quot;blog.bufferapp.com/the-10-most-important-marketing-lessons-i-learned-working-at-facebook-mint-and-appsumo&quot;
+##  [3] &quot;blog.bufferapp.com/free-image-sources-list&quot;                                                               
+##  [4] &quot;open.bufferapp.com/raising-3-5m-funding-valuation-term-sheet&quot;                                             
+##  [5] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                                         
+##  [6] &quot;open.bufferapp.com/transparent-pricing-buffer&quot;                                                            
+##  [7] &quot;blog.bufferapp.com/5-ways-to-get-more-done-by-working-smarter-not-harder&quot;                                 
+##  [8] &quot;blog.bufferapp.com/best-social-media-tools-for-small-business&quot;                                            
+##  [9] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+## [10] &quot;blog.bufferapp.com/how-to-save-time-on-social-media&quot;                                                      
+## 
+## $Caryn
+##  [1] &quot;medium.com/m/global-identity&quot;                                
+##  [2] &quot;open.buffer.com/top-words-of-buffer&quot;                         
+##  [3] &quot;open.buffer.com/buffer-acquires-respondly&quot;                   
+##  [4] &quot;open.buffer.com/equal-pay&quot;                                   
+##  [5] &quot;blog.bufferapp.com/social-media-2016&quot;                        
+##  [6] &quot;open.buffer.com/work-less&quot;                                   
+##  [7] &quot;open.buffer.com/remote-work-retreats&quot;                        
+##  [8] &quot;open.buffer.com/wholeness&quot;                                   
+##  [9] &quot;open.buffer.com/transparency-meets-inconsistency&quot;            
+## [10] &quot;open.buffer.com/27-question-to-ask-instead-of-what-do-you-do&quot;
+## 
+## $`Colin Ross`
+##  [1] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                             
+##  [2] &quot;open.bufferapp.com/buffer-distributed-team-how-we-work&quot;                                
+##  [3] &quot;open.bufferapp.com/transparent-pricing-buffer&quot;                                         
+##  [4] &quot;blog.bufferapp.com/the-habits-of-successful-people-they-do-the-painful-things-first&quot;   
+##  [5] &quot;blog.bufferapp.com/5-more-ways-to-work-smarter-not-harder&quot;                             
+##  [6] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                      
+##  [7] &quot;open.bufferapp.com/decision-maker-no-managers-experiment&quot;                              
+##  [8] &quot;producthunt.com/e/tools-for-remote-teams&quot;                                              
+##  [9] &quot;blog.bufferapp.com/the-science-of-time-perception-how-to-make-your-days-longer&quot;        
+## [10] &quot;blog.bufferapp.com/which-words-matter-the-most-when-we-talk-the-psychology-of-language&quot;
+## 
+## $`Courtney Seiter`
+##  [1] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                         
+##  [2] &quot;blog.bufferapp.com/the-mistake-smart-people-make-being-in-motion-vs-taking-action&quot;               
+##  [3] &quot;medium.com/@michael_erasmus/how-i-found-my-ideal-lifestyle-through-working-remotely-deb7ba8be5c9&quot;
+##  [4] &quot;medium.com/m/global-identity&quot;                                                                    
+##  [5] &quot;99u.com/articles/24401/a-makers-guidebook-9-stoic-principles-to-nurture-your-life-and-work&quot;      
+##  [6] &quot;sparringmind.com/benefits-of-writing&quot;                                                            
+##  [7] &quot;producthunt.com/tech/customer-support-academy&quot;                                                   
+##  [8] &quot;quicksprout.com/2014/04/14/how-these-15-types-of-content-will-drive-you-more-traffic&quot;            
+##  [9] &quot;socialmediaexaminer.com/16-blogging-resources-improve-blog&quot;                                      
+## [10] &quot;open.bufferapp.com/customer-development-interviews-using-twitter&quot;                                
+## 
+## $Dan
+##  [1] &quot;open.bufferapp.com/buffer-distributed-team-how-we-work&quot;                    
+##  [2] &quot;buffer.com/journey&quot;                                                        
+##  [3] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;          
+##  [4] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;   
+##  [5] &quot;blog.bufferapp.com/the-science-of-colors-in-marketing-why-is-facebook-blue&quot;
+##  [6] &quot;blog.bufferapp.com/free-image-sources-list&quot;                                
+##  [7] &quot;open.bufferapp.com/transparent-pricing-buffer&quot;                             
+##  [8] &quot;buffer.com/gifs-for-social-media&quot;                                          
+##  [9] &quot;producthunt.com/tech/customer-support-academy&quot;                             
+## [10] &quot;blog.bufferapp.com/a-complete-guide-to-creating-awesome-visual-content&quot;    
+## 
+## $`Dan Farrelly`
+##  [1] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                      
+##  [2] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                               
+##  [3] &quot;buffer.com/journey&quot;                                                                             
+##  [4] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                        
+##  [5] &quot;open.bufferapp.com/decision-maker-no-managers-experiment&quot;                                       
+##  [6] &quot;open.bufferapp.com/raising-3-5m-funding-valuation-term-sheet&quot;                                   
+##  [7] &quot;open.bufferapp.com/blending-work-and-life-what-remote-work-looks-like-for-families-and-partners&quot;
+##  [8] &quot;blog.bufferapp.com/buffer-for-video&quot;                                                            
+##  [9] &quot;open.bufferapp.com/diversity-dashboard&quot;                                                         
+## [10] &quot;blog.bufferapp.com/improve-your-marketing-unique-new-ideas&quot;                                     
+## 
+## $`Daniel Siemaszkiewicz`
+##  [1] &quot;open.buffer.com/keep-going&quot;                    
+##  [2] &quot;open.buffer.com/wholeness&quot;                     
+##  [3] &quot;open.buffer.com/product&quot;                       
+##  [4] &quot;overflow.buffer.com/2016/02/22/timezones&quot;      
+##  [5] &quot;blog.bufferapp.com/snapchat&quot;                   
+##  [6] &quot;open.buffer.com/pricing-2016&quot;                  
+##  [7] &quot;open.buffer.com/holidays-international-startup&quot;
+##  [8] &quot;open.buffer.com/top-words-of-buffer&quot;           
+##  [9] &quot;medium.com/m/global-identity&quot;                  
+## [10] &quot;open.buffer.com/diversity-in-technology&quot;       
+## 
+## $`Danny Mulcahy`
+##  [1] &quot;medium.com/m/global-identity&quot;                                                                                           
+##  [2] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                                               
+##  [3] &quot;open.buffer.com/product&quot;                                                                                                
+##  [4] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                                                   
+##  [5] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                                
+##  [6] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                                            
+##  [7] &quot;open.buffer.com/why-startups-are-so-hard-the-future-of-buffer-and-my-biggest-mistake-so-far-tweets-from-my-airplane-ama&quot;
+##  [8] &quot;buffer.com/2016&quot;                                                                                                        
+##  [9] &quot;open.buffer.com/keep-going&quot;                                                                                             
+## [10] &quot;producthunt.com/tech/customer-support-academy&quot;                                                                          
+## 
+## $`Darcy Peters`
+##  [1] &quot;blog.bufferapp.com/new-social-media-tools-2017&quot;                         
+##  [2] &quot;open.buffer.com/product&quot;                                                
+##  [3] &quot;blog.bufferapp.com/social-media-2016&quot;                                   
+##  [4] &quot;open.buffer.com/be-less-busy&quot;                                           
+##  [5] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;
+##  [6] &quot;blog.bufferapp.com/idea-curation-get-more-ideas&quot;                        
+##  [7] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                               
+##  [8] &quot;open.buffer.com/top-10-learnings-growing-to-10-million-arr&quot;             
+##  [9] &quot;blog.bufferapp.com/10-social-media-goals&quot;                               
+## [10] &quot;blog.bufferapp.com/snapchat&quot;                                            
+## 
+## $`dave chapman`
+##  [1] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                                
+##  [2] &quot;blog.bufferapp.com/marketing&quot;                                                                             
+##  [3] &quot;blog.bufferapp.com/the-science-of-colors-in-marketing-why-is-facebook-blue&quot;                               
+##  [4] &quot;blog.bufferapp.com/a-complete-guide-to-creating-awesome-visual-content&quot;                                   
+##  [5] &quot;blog.bufferapp.com/get-more-followers-twitter-facebook-research&quot;                                          
+##  [6] &quot;blog.bufferapp.com/7-vital-statistics-to-help-with-your-linkedin-marketing-strategy&quot;                      
+##  [7] &quot;blog.bufferapp.com/the-10-most-important-marketing-lessons-i-learned-working-at-facebook-mint-and-appsumo&quot;
+##  [8] &quot;blog.bufferapp.com/how-to-save-time-on-social-media&quot;                                                      
+##  [9] &quot;medium.com/m/global-identity&quot;                                                                             
+## [10] &quot;blog.bufferapp.com/twitter-tips-for-beginners&quot;                                                            
+## 
+## $`Dave O&#39;Callaghan`
+##  [1] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                               
+##  [2] &quot;open.buffer.com/buffer-acquires-respondly&quot;                              
+##  [3] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;
+##  [4] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;   
+##  [5] &quot;open.buffer.com/transparency-timeline&quot;                                  
+##  [6] &quot;timezone.io/team/buffer&quot;                                                
+##  [7] &quot;open.buffer.com/transparent-product-roadmap&quot;                            
+##  [8] &quot;open.buffer.com/growth&quot;                                                 
+##  [9] &quot;open.bufferapp.com/startup-mindset&quot;                                     
+## [10] &quot;open.buffer.com/holidays-international-startup&quot;                         
+## 
+## $`David Gasquez`
+##  [1] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                  
+##  [2] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                                 
+##  [3] &quot;overflow.buffer.com/2016/02/11/slack-meet-looker-an-experiment-in-bringing-data-to-the-team&quot;              
+##  [4] &quot;open.buffer.com/equal-pay&quot;                                                                                
+##  [5] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                                     
+##  [6] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                                
+##  [7] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+##  [8] &quot;expeditedssl.com/aws-in-plain-english&quot;                                                                    
+##  [9] &quot;overflow.buffer.com/2016/03/28/building-slack-slash-commands-with-aws-lambda&quot;                             
+## [10] &quot;medium.com/@michael_erasmus/how-i-found-my-ideal-lifestyle-through-working-remotely-deb7ba8be5c9&quot;         
+## 
+## $`David Saunders`
+##  [1] &quot;medium.com/m/global-identity&quot;                                                                                           
+##  [2] &quot;open.buffer.com/keep-going&quot;                                                                                             
+##  [3] &quot;open.buffer.com/pricing-2016&quot;                                                                                           
+##  [4] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                                                       
+##  [5] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                                              
+##  [6] &quot;open.buffer.com/stop-energy&quot;                                                                                            
+##  [7] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                                
+##  [8] &quot;open.buffer.com/product&quot;                                                                                                
+##  [9] &quot;buffer.com/journey&quot;                                                                                                     
+## [10] &quot;open.buffer.com/why-startups-are-so-hard-the-future-of-buffer-and-my-biggest-mistake-so-far-tweets-from-my-airplane-ama&quot;
+## 
+## $`Déborah RIPPOL`
+##  [1] &quot;open.buffer.com/transparent-product-roadmap&quot;                                            
+##  [2] &quot;open.buffer.com/product&quot;                                                                
+##  [3] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                   
+##  [4] &quot;open.buffer.com/holidays-international-startup&quot;                                         
+##  [5] &quot;open.buffer.com/stop-energy&quot;                                                            
+##  [6] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                              
+##  [7] &quot;overflow.buffer.com/2016/03/31/how-we-saved-132k-a-year-by-spring-cleaning-our-back-end&quot;
+##  [8] &quot;open.buffer.com/wholeness&quot;                                                              
+##  [9] &quot;open.buffer.com/buffer-beta-program&quot;                                                    
+## [10] &quot;open.buffer.com/keep-going&quot;                                                             
+## 
+## $`Emily Mae`
+##  [1] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                              
+##  [2] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                                 
+##  [3] &quot;open.buffer.com/wholeness&quot;                                                                            
+##  [4] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                            
+##  [5] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                             
+##  [6] &quot;open.buffer.com/stop-energy&quot;                                                                          
+##  [7] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                          
+##  [8] &quot;bradfrost.com/blog/post/atomic-web-design&quot;                                                            
+##  [9] &quot;blog.bufferapp.com/optimal-work-time-how-long-should-we-work-every-day-the-science-of-mental-strength&quot;
+## [10] &quot;medium.com/m/global-identity&quot;                                                                         
+## 
+## $`Eric Khun`
+##  [1] &quot;open.buffer.com/buffer-acquires-respondly&quot;                           
+##  [2] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;
+##  [3] &quot;medium.com/m/global-identity&quot;                                        
+##  [4] &quot;open.buffer.com/transparent-product-roadmap&quot;                         
+##  [5] &quot;open.buffer.com/27-question-to-ask-instead-of-what-do-you-do&quot;        
+##  [6] &quot;blog.bufferapp.com/hello-respond&quot;                                    
+##  [7] &quot;open.buffer.com/growth&quot;                                              
+##  [8] &quot;buffer.com/2016&quot;                                                     
+##  [9] &quot;open.buffer.com/work-less&quot;                                           
+## [10] &quot;open.buffer.com/top-books-2015&quot;                                      
+## 
+## $`Federico Weber`
+##  [1] &quot;medium.com/m/global-identity&quot;                                                                             
+##  [2] &quot;overflow.buffer.com/2016/03/31/how-we-saved-132k-a-year-by-spring-cleaning-our-back-end&quot;                  
+##  [3] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                                
+##  [4] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+##  [5] &quot;open.buffer.com/feedback&quot;                                                                                 
+##  [6] &quot;open.buffer.com/stop-energy&quot;                                                                              
+##  [7] &quot;producthunt.com/tech/customer-support-academy&quot;                                                            
+##  [8] &quot;open.buffer.com/buffer-beta-program&quot;                                                                      
+##  [9] &quot;open.buffer.com/product&quot;                                                                                  
+## [10] &quot;open.bufferapp.com/startup-mindset&quot;                                                                       
+## 
+## $`Hailley Mari`
+##  [1] &quot;open.buffer.com/product&quot;                                                     
+##  [2] &quot;open.buffer.com/keep-going&quot;                                                  
+##  [3] &quot;open.buffer.com/pablo-startup-within-a-startup&quot;                              
+##  [4] &quot;blog.bufferapp.com/marketing&quot;                                                
+##  [5] &quot;blog.bufferapp.com/a-complete-guide-to-creating-awesome-visual-content&quot;      
+##  [6] &quot;open.buffer.com/5-ways-to-break-your-filter-bubble-and-gain-new-perspectives&quot;
+##  [7] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                   
+##  [8] &quot;blog.bufferapp.com/free-twitter-tools&quot;                                       
+##  [9] &quot;open.buffer.com/27-question-to-ask-instead-of-what-do-you-do&quot;                
+## [10] &quot;blog.bufferapp.com/free-image-sources-list&quot;                                  
+## 
+## $`Hamish Macpherson`
+##  [1] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                  
+##  [2] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                                 
+##  [3] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                                
+##  [4] &quot;open.buffer.com/feedback&quot;                                                                                 
+##  [5] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                              
+##  [6] &quot;medium.com/m/global-identity&quot;                                                                             
+##  [7] &quot;buffer.com/respond/blog/why-everyone-at-respond-does-customer-support&quot;                                    
+##  [8] &quot;open.buffer.com/equal-pay&quot;                                                                                
+##  [9] &quot;open.buffer.com/stop-energy&quot;                                                                              
+## [10] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+## 
+## $`Hannah Voice`
+##  [1] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                                     
+##  [2] &quot;medium.com/m/global-identity&quot;                                                                             
+##  [3] &quot;open.buffer.com/feedback&quot;                                                                                 
+##  [4] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+##  [5] &quot;open.buffer.com/equal-pay&quot;                                                                                
+##  [6] &quot;open.buffer.com/no-office&quot;                                                                                
+##  [7] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                  
+##  [8] &quot;buffer.com/2016&quot;                                                                                          
+##  [9] &quot;blog.bufferapp.com/social-media-marketing-resources-kit&quot;                                                  
+## [10] &quot;soundcloud.com/bufferapp/radical-culture-episode-one&quot;                                                     
+## 
+## $`Harrison Harnisch`
+##  [1] &quot;blog.bufferapp.com/how-to-repost-on-instagram&quot;                                
+##  [2] &quot;open.buffer.com/keep-going&quot;                                                   
+##  [3] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;      
+##  [4] &quot;open.buffer.com/buffer-values&quot;                                                
+##  [5] &quot;t.co&quot;                                                                         
+##  [6] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                     
+##  [7] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;         
+##  [8] &quot;design.blog/2017/03/23/catt-small-on-designing-an-inclusive-workplace-culture&quot;
+##  [9] &quot;devex.com/news/no-cuts-to-uk-aid-in-2015-2016-81322&quot;                          
+## [10] &quot;donutjs.club/speak&quot;                                                           
+## 
+## $`Humber Aquino`
+##  [1] &quot;open.buffer.com/product&quot;                                                                
+##  [2] &quot;open.buffer.com/holidays-international-startup&quot;                                         
+##  [3] &quot;open.buffer.com/equal-pay&quot;                                                              
+##  [4] &quot;open.buffer.com/buffer-beta-program&quot;                                                    
+##  [5] &quot;overflow.buffer.com/2016/03/31/how-we-saved-132k-a-year-by-spring-cleaning-our-back-end&quot;
+##  [6] &quot;open.buffer.com/stop-energy&quot;                                                            
+##  [7] &quot;open.buffer.com/keep-going&quot;                                                             
+##  [8] &quot;buffer.com/journey&quot;                                                                     
+##  [9] &quot;timezone.io/team/buffer&quot;                                                                
+## [10] &quot;open.buffer.com/transparency-timeline&quot;                                                  
+## 
+## $`Ivana Zuber`
+##  [1] &quot;open.bufferapp.com/buffer-distributed-team-how-we-work&quot;                                          
+##  [2] &quot;open.bufferapp.com/transparent-pricing-buffer&quot;                                                   
+##  [3] &quot;producthunt.com/e/tools-for-remote-teams&quot;                                                        
+##  [4] &quot;open.bufferapp.com/decision-maker-no-managers-experiment&quot;                                        
+##  [5] &quot;open.bufferapp.com/raising-3-5m-funding-valuation-term-sheet&quot;                                    
+##  [6] &quot;open.bufferapp.com/send-better-email&quot;                                                            
+##  [7] &quot;open.bufferapp.com/side-projects-creative-hobbies&quot;                                               
+##  [8] &quot;blog.bufferapp.com/social-media-goals&quot;                                                           
+##  [9] &quot;blog.bufferapp.com/social-media-marketing-resources-kit&quot;                                         
+## [10] &quot;medium.com/@michael_erasmus/how-i-found-my-ideal-lifestyle-through-working-remotely-deb7ba8be5c9&quot;
+## 
+## $`James Morris`
+##  [1] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                
+##  [2] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                   
+##  [3] &quot;medium.com/m/global-identity&quot;                                                           
+##  [4] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                              
+##  [5] &quot;open.buffer.com/buffer-beta-program&quot;                                                    
+##  [6] &quot;open.buffer.com/remote-working-rv-part-one&quot;                                             
+##  [7] &quot;open.buffer.com/holidays-international-startup&quot;                                         
+##  [8] &quot;open.buffer.com/product&quot;                                                                
+##  [9] &quot;open.buffer.com/stop-energy&quot;                                                            
+## [10] &quot;overflow.buffer.com/2016/03/31/how-we-saved-132k-a-year-by-spring-cleaning-our-back-end&quot;
+## 
+## $`Jenny Terry`
+##  [1] &quot;youtube.com/watch&quot;                                                                                        
+##  [2] &quot;open.buffer.com/stop-energy&quot;                                                                              
+##  [3] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                              
+##  [4] &quot;blog.bufferapp.com/social-media-2016&quot;                                                                     
+##  [5] &quot;open.buffer.com/equal-pay&quot;                                                                                
+##  [6] &quot;open.buffer.com/keep-going&quot;                                                                               
+##  [7] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                                 
+##  [8] &quot;open.buffer.com/feedback&quot;                                                                                 
+##  [9] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+## [10] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                  
+## 
+## $`Jess Williams`
+##  [1] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;
+##  [2] &quot;open.buffer.com/buffer-acquires-respondly&quot;                              
+##  [3] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;   
+##  [4] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                               
+##  [5] &quot;open.buffer.com/what-family-leave-really-looks-like-at-a-tech-startup&quot;  
+##  [6] &quot;open.buffer.com/wholeness&quot;                                              
+##  [7] &quot;open.buffer.com/keep-going&quot;                                             
+##  [8] &quot;medium.com/m/global-identity&quot;                                           
+##  [9] &quot;open.buffer.com/equal-pay&quot;                                              
+## [10] &quot;open.buffer.com/transparent-product-roadmap&quot;                            
+## 
+## $`Joe Birch`
+##  [1] &quot;youtube.com/watch&quot;                                                                      
+##  [2] &quot;medium.com/m/global-identity&quot;                                                           
+##  [3] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                               
+##  [4] &quot;opensource.com/open-organization/16/5/buffer-open-culture&quot;                              
+##  [5] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                   
+##  [6] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                
+##  [7] &quot;open.buffer.com/transparent-product-roadmap&quot;                                            
+##  [8] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                              
+##  [9] &quot;overflow.buffer.com/2016/03/31/how-we-saved-132k-a-year-by-spring-cleaning-our-back-end&quot;
+## [10] &quot;open.buffer.com/holidays-international-startup&quot;                                         
+## 
+## $`Joel Gascoigne`
+##  [1] &quot;blog.bufferapp.com/the-10-most-important-marketing-lessons-i-learned-working-at-facebook-mint-and-appsumo&quot;
+##  [2] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                                         
+##  [3] &quot;open.bufferapp.com/customer-service-emails-words&quot;                                                         
+##  [4] &quot;blog.bufferapp.com/7-vital-statistics-to-help-with-your-linkedin-marketing-strategy&quot;                      
+##  [5] &quot;open.bufferapp.com/diversity-dashboard&quot;                                                                   
+##  [6] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                  
+##  [7] &quot;blog.bufferapp.com/how-to-create-manage-facebook-business-page&quot;                                           
+##  [8] &quot;blog.bufferapp.com/how-to-measure-progress-in-your-personal-goals-daily-weekly-and-monthly&quot;               
+##  [9] &quot;blog.bufferapp.com/the-science-of-colors-in-marketing-why-is-facebook-blue&quot;                               
+## [10] &quot;buffer.com/journey&quot;                                                                                       
+## 
+## $`Jordan Morgan`
+##  [1] &quot;overflow.buffer.com/2016/02/22/timezones&quot;             
+##  [2] &quot;open.buffer.com/buffer-acquires-respondly&quot;            
+##  [3] &quot;open.buffer.com/transparent-product-roadmap&quot;          
+##  [4] &quot;open.buffer.com/holidays-international-startup&quot;       
+##  [5] &quot;buffer.com/respond/blog/social-media-customer-service&quot;
+##  [6] &quot;open.buffer.com/feedback&quot;                             
+##  [7] &quot;open.buffer.com/product&quot;                              
+##  [8] &quot;open.buffer.com/top-words-of-buffer&quot;                  
+##  [9] &quot;open.buffer.com/partner-buffer-retreat&quot;               
+## [10] &quot;open.buffer.com/transparent-salaries&quot;                 
+## 
+## $`José Manuel`
+##  [1] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                                         
+##  [2] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                                
+##  [3] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                                 
+##  [4] &quot;blog.bufferapp.com/the-10-most-important-marketing-lessons-i-learned-working-at-facebook-mint-and-appsumo&quot;
+##  [5] &quot;buffer.com/journey&quot;                                                                                       
+##  [6] &quot;blog.bufferapp.com/a-complete-guide-to-creating-awesome-visual-content&quot;                                   
+##  [7] &quot;open.bufferapp.com/startup-mindset&quot;                                                                       
+##  [8] &quot;blog.remotive.io/buffer-retreat-in-iceland-from-inside&quot;                                                   
+##  [9] &quot;open.bufferapp.com/buffer-distributed-team-how-we-work&quot;                                                   
+## [10] &quot;medium.com/m/global-identity&quot;                                                                             
+## 
+## $`Julia Breathes`
+##  [1] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                                            
+##  [2] &quot;blog.bufferapp.com/social-media-analytics-tools&quot;                                                                        
+##  [3] &quot;open.buffer.com/pricing-2016&quot;                                                                                           
+##  [4] &quot;thought-leadership.top-consultant.com/uk/FullArticle.aspx&quot;                                                              
+##  [5] &quot;open.buffer.com/product&quot;                                                                                                
+##  [6] &quot;blog.bufferapp.com/social-media-design-tips&quot;                                                                            
+##  [7] &quot;open.buffer.com/why-startups-are-so-hard-the-future-of-buffer-and-my-biggest-mistake-so-far-tweets-from-my-airplane-ama&quot;
+##  [8] &quot;buffer.com/2016&quot;                                                                                                        
+##  [9] &quot;open.buffer.com/productivity-tips-digital-nomads&quot;                                                                       
+## [10] &quot;blog.bufferapp.com/facebook-reactions&quot;                                                                                  
+## 
+## $`Julian Winternheimer`
+##  [1] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                     
+##  [2] &quot;open.buffer.com/holidays-international-startup&quot;                                                  
+##  [3] &quot;open.buffer.com/pricing-2016&quot;                                                                    
+##  [4] &quot;open.buffer.com/feedback&quot;                                                                        
+##  [5] &quot;open.buffer.com/stop-energy&quot;                                                                     
+##  [6] &quot;open.bufferapp.com/blending-work-and-life-what-remote-work-looks-like-for-families-and-partners&quot; 
+##  [7] &quot;open.buffer.com/wholeness&quot;                                                                       
+##  [8] &quot;medium.com/@michael_erasmus/how-i-found-my-ideal-lifestyle-through-working-remotely-deb7ba8be5c9&quot;
+##  [9] &quot;open.buffer.com/keep-going&quot;                                                                      
+## [10] &quot;open.buffer.com/top-words-of-buffer&quot;                                                             
+## 
+## $`Juliet Chen`
+##  [1] &quot;open.buffer.com/product&quot;                                                            
+##  [2] &quot;open.buffer.com/keep-going&quot;                                                         
+##  [3] &quot;open.buffer.com/transparent-product-roadmap&quot;                                        
+##  [4] &quot;buffer.com/2016&quot;                                                                    
+##  [5] &quot;open.buffer.com/pricing-2016&quot;                                                       
+##  [6] &quot;blog.bufferapp.com/new-social-media-tools-2017&quot;                                     
+##  [7] &quot;blog.bufferapp.com/idea-curation-get-more-ideas&quot;                                    
+##  [8] &quot;blog.bufferapp.com/7-vital-statistics-to-help-with-your-linkedin-marketing-strategy&quot;
+##  [9] &quot;blog.bufferapp.com/how-to-create-powerful-twitter-bio&quot;                              
+## [10] &quot;open.buffer.com/no-office&quot;                                                          
+## 
+## $`Karinna Briseno`
+##  [1] &quot;open.buffer.com/transparent-product-roadmap&quot;                            
+##  [2] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;
+##  [3] &quot;open.buffer.com/stop-energy&quot;                                            
+##  [4] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                               
+##  [5] &quot;open.buffer.com/top-10-learnings-growing-to-10-million-arr&quot;             
+##  [6] &quot;open.buffer.com/transparency-meets-inconsistency&quot;                       
+##  [7] &quot;open.buffer.com/remote-working-rv-part-one&quot;                             
+##  [8] &quot;open.buffer.com/productivity-tips-digital-nomads&quot;                       
+##  [9] &quot;open.buffer.com/pricing-2016&quot;                                           
+## [10] &quot;open.buffer.com/pablo-startup-within-a-startup&quot;                         
+## 
+## $Katie
+##  [1] &quot;open.buffer.com/transparent-product-roadmap&quot;                            
+##  [2] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;
+##  [3] &quot;open.buffer.com/product&quot;                                                
+##  [4] &quot;medium.com/m/global-identity&quot;                                           
+##  [5] &quot;open.buffer.com/holidays-international-startup&quot;                         
+##  [6] &quot;open.buffer.com/feedback&quot;                                               
+##  [7] &quot;open.buffer.com/buffer-acquires-respondly&quot;                              
+##  [8] &quot;open.buffer.com/stop-energy&quot;                                            
+##  [9] &quot;buffer.com/journey&quot;                                                     
+## [10] &quot;open.buffer.com/equal-pay&quot;                                              
+## 
+## $`Kelly Vass`
+##  [1] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                              
+##  [2] &quot;open.buffer.com/product&quot;                                                                                  
+##  [3] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                                
+##  [4] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                                 
+##  [5] &quot;open.buffer.com/holidays-international-startup&quot;                                                           
+##  [6] &quot;open.buffer.com/stop-energy&quot;                                                                              
+##  [7] &quot;open.buffer.com/27-question-to-ask-instead-of-what-do-you-do&quot;                                             
+##  [8] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                  
+##  [9] &quot;open.buffer.com/what-family-leave-really-looks-like-at-a-tech-startup&quot;                                    
+## [10] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+## 
+## $`Kevan Lee`
+##  [1] &quot;producthunt.com/e/tools-for-remote-teams&quot;                                                                 
+##  [2] &quot;open.buffer.com/no-office&quot;                                                                                
+##  [3] &quot;open.bufferapp.com/distributed-team-benefits&quot;                                                             
+##  [4] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+##  [5] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                              
+##  [6] &quot;open.buffer.com/product&quot;                                                                                  
+##  [7] &quot;blog.bufferapp.com/social-media-calendar&quot;                                                                 
+##  [8] &quot;open.buffer.com/diversity-in-technology&quot;                                                                  
+##  [9] &quot;open.buffer.com/remote-work-gear&quot;                                                                         
+## [10] &quot;open.buffer.com/stop-energy&quot;                                                                              
+## 
+## $`Marcus Wermuth`
+##  [1] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                  
+##  [2] &quot;open.buffer.com/product&quot;                                                                                  
+##  [3] &quot;open.buffer.com/wholeness&quot;                                                                                
+##  [4] &quot;open.buffer.com/remote-working-rv-part-one&quot;                                                               
+##  [5] &quot;open.buffer.com/equal-pay&quot;                                                                                
+##  [6] &quot;open.buffer.com/buffer-beta-program&quot;                                                                      
+##  [7] &quot;buffer.com/respond/blog/social-media-customer-service&quot;                                                    
+##  [8] &quot;open.buffer.com/team-bonding-retreat&quot;                                                                     
+##  [9] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+## [10] &quot;buffer.com/journey&quot;                                                                                       
+## 
+## $`Matt Allen`
+##  [1] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                               
+##  [2] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                   
+##  [3] &quot;open.buffer.com/transparent-product-roadmap&quot;                                            
+##  [4] &quot;medium.com/m/global-identity&quot;                                                           
+##  [5] &quot;open.buffer.com/stop-energy&quot;                                                            
+##  [6] &quot;open.buffer.com/feedback&quot;                                                               
+##  [7] &quot;open.buffer.com/buffer-beta-program&quot;                                                    
+##  [8] &quot;open.buffer.com/equal-pay&quot;                                                              
+##  [9] &quot;overflow.buffer.com/2016/03/31/how-we-saved-132k-a-year-by-spring-cleaning-our-back-end&quot;
+## [10] &quot;open.buffer.com/growth&quot;                                                                 
+## 
+## $`maxime berthelot`
+##  [1] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                                         
+##  [2] &quot;blog.bufferapp.com/improve-your-marketing-unique-new-ideas&quot;                                               
+##  [3] &quot;blog.bufferapp.com/get-more-followers-twitter-facebook-research&quot;                                          
+##  [4] &quot;blog.bufferapp.com/the-10-most-important-marketing-lessons-i-learned-working-at-facebook-mint-and-appsumo&quot;
+##  [5] &quot;open.buffer.com/product&quot;                                                                                  
+##  [6] &quot;blog.bufferapp.com/a-complete-guide-to-creating-awesome-visual-content&quot;                                   
+##  [7] &quot;blog.bufferapp.com/how-to-create-powerful-twitter-bio&quot;                                                    
+##  [8] &quot;blog.bufferapp.com/instagram-for-business&quot;                                                                
+##  [9] &quot;open.bufferapp.com/transparent-pricing-buffer&quot;                                                            
+## [10] &quot;buffer.com/journey&quot;                                                                                       
+## 
+## $`Melissa Alvarez`
+##  [1] &quot;youtube.com/watch&quot;                                                                      
+##  [2] &quot;overflow.buffer.com/2016/03/31/how-we-saved-132k-a-year-by-spring-cleaning-our-back-end&quot;
+##  [3] &quot;alexkras.com/19-git-tips-for-everyday-use&quot;                                              
+##  [4] &quot;expeditedssl.com/aws-in-plain-english&quot;                                                  
+##  [5] &quot;jdlm.info/articles/2016/07/04/cto-time-minute-by-minute.html&quot;                           
+##  [6] &quot;kite.com&quot;                                                                               
+##  [7] &quot;tranquilmonkey.com/hunter-s-thompsons-extraordinary-letter-on-finding-your-purpose&quot;     
+##  [8] &quot;github.com/alex/what-happens-when&quot;                                                      
+##  [9] &quot;medium.com/@stewart/we-dont-sell-saddles-here-4c59524d650d&quot;                             
+## [10] &quot;overflow.buffer.com/2016/02/08/retreat-app&quot;                                             
+## 
+## $`Michael Eckstein`
+##  [1] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                                               
+##  [2] &quot;open.buffer.com/holidays-international-startup&quot;                                                                         
+##  [3] &quot;open.buffer.com/pricing-2016&quot;                                                                                           
+##  [4] &quot;blog.bufferapp.com/social-media-marketing-resources-kit&quot;                                                                
+##  [5] &quot;blog.bufferapp.com/facebook-reactions&quot;                                                                                  
+##  [6] &quot;open.buffer.com/why-startups-are-so-hard-the-future-of-buffer-and-my-biggest-mistake-so-far-tweets-from-my-airplane-ama&quot;
+##  [7] &quot;open.buffer.com/partner-buffer-retreat&quot;                                                                                 
+##  [8] &quot;blog.bufferapp.com/social-media-analytics-tools&quot;                                                                        
+##  [9] &quot;open.buffer.com/remote-work-retreats&quot;                                                                                   
+## [10] &quot;buffer.com/journey&quot;                                                                                                     
+## 
+## $`Michael Erasmus`
+##  [1] &quot;blog.bufferapp.com/free-image-sources-list&quot;                                                               
+##  [2] &quot;blog.bufferapp.com/the-10-most-important-marketing-lessons-i-learned-working-at-facebook-mint-and-appsumo&quot;
+##  [3] &quot;open.bufferapp.com/customer-service-emails-words&quot;                                                         
+##  [4] &quot;open.bufferapp.com/mainstream-news&quot;                                                                       
+##  [5] &quot;blog.bufferapp.com/gifs&quot;                                                                                  
+##  [6] &quot;blog.bufferapp.com/how-to-save-time-on-social-media&quot;                                                      
+##  [7] &quot;blog.bufferapp.com/a-complete-guide-to-creating-awesome-visual-content&quot;                                   
+##  [8] &quot;buffer.com/gifs-for-social-media&quot;                                                                         
+##  [9] &quot;blog.bufferapp.com/facebook-tools&quot;                                                                        
+## [10] &quot;blog.bufferapp.com/marketing&quot;                                                                             
+## 
+## $`Mick Mahady`
+##  [1] &quot;open.buffer.com/transparent-product-roadmap&quot;                         
+##  [2] &quot;medium.com/m/global-identity&quot;                                        
+##  [3] &quot;blog.bufferapp.com/social-media-analytics-tools&quot;                     
+##  [4] &quot;open.buffer.com/keep-going&quot;                                          
+##  [5] &quot;blog.bufferapp.com/social-media-2016&quot;                                
+##  [6] &quot;blog.bufferapp.com/snapchat&quot;                                         
+##  [7] &quot;blog.bufferapp.com/animated-gifs&quot;                                    
+##  [8] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;
+##  [9] &quot;open.buffer.com/pablo-startup-within-a-startup&quot;                      
+## [10] &quot;open.buffer.com/diversity-in-technology&quot;                             
+## 
+## $`Miguel San Román`
+##  [1] &quot;blog.bufferapp.com/the-science-of-colors-in-marketing-why-is-facebook-blue&quot;                           
+##  [2] &quot;blog.bufferapp.com/get-more-followers-twitter-facebook-research&quot;                                      
+##  [3] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                          
+##  [4] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                            
+##  [5] &quot;open.buffer.com/remote-work-gear&quot;                                                                     
+##  [6] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                                     
+##  [7] &quot;open.buffer.com/sorry&quot;                                                                                
+##  [8] &quot;blog.bufferapp.com/optimal-work-time-how-long-should-we-work-every-day-the-science-of-mental-strength&quot;
+##  [9] &quot;blog.bufferapp.com/social-media-analytics-tools&quot;                                                      
+## [10] &quot;about.gitlab.com/2017/03/14/buffer-and-gitlab-ceos-talk-transparency&quot;                                 
+## 
+## $`Nicole M Miller`
+##  [1] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                            
+##  [2] &quot;blog.bufferapp.com/the-science-of-smiling-a-guide-to-humans-most-powerful-gesture&quot;                    
+##  [3] &quot;blog.bufferapp.com/twitter-tips-for-beginners&quot;                                                        
+##  [4] &quot;open.bufferapp.com/customer-service-emails-words&quot;                                                     
+##  [5] &quot;blog.bufferapp.com/social-media-analytics-tools&quot;                                                      
+##  [6] &quot;blog.bufferapp.com/which-words-matter-the-most-when-we-talk-the-psychology-of-language&quot;               
+##  [7] &quot;blog.bufferapp.com/the-mistake-smart-people-make-being-in-motion-vs-taking-action&quot;                    
+##  [8] &quot;blog.bufferapp.com/optimal-work-time-how-long-should-we-work-every-day-the-science-of-mental-strength&quot;
+##  [9] &quot;blog.bufferapp.com/instagram-for-business&quot;                                                            
+## [10] &quot;julheimer.com/blog/2015/4/23/what-i-learned-doing-customer-support-exclusively-for-a-week&quot;            
+## 
+## $`Octavio Aburto`
+##  [1] &quot;blog.bufferapp.com/the-habits-of-successful-people-they-do-the-painful-things-first&quot;
+##  [2] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                   
+##  [3] &quot;blog.bufferapp.com/a-scientific-guide-to-hashtags-which-ones-work-when-and-how-many&quot;
+##  [4] &quot;open.bufferapp.com/raising-3-5m-funding-valuation-term-sheet&quot;                       
+##  [5] &quot;blog.bufferapp.com/free-twitter-tools&quot;                                              
+##  [6] &quot;blog.bufferapp.com/improve-your-marketing-unique-new-ideas&quot;                         
+##  [7] &quot;open.bufferapp.com/decision-maker-no-managers-experiment&quot;                           
+##  [8] &quot;blog.bufferapp.com/3-remarkable-lessons-on-mental-strength-from-the-marathon-monks&quot; 
+##  [9] &quot;buffer.com/journey&quot;                                                                 
+## [10] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;            
+## 
+## $`Paul Thomson`
+##  [1] &quot;open.buffer.com/keep-going&quot;                      
+##  [2] &quot;open.buffer.com/transparent-product-roadmap&quot;     
+##  [3] &quot;blog.bufferapp.com/social-media-analytics-tools&quot; 
+##  [4] &quot;open.buffer.com/sorry&quot;                           
+##  [5] &quot;blog.bufferapp.com/facebook-reactions&quot;           
+##  [6] &quot;blog.bufferapp.com/social-media-slideshares-2016&quot;
+##  [7] &quot;blog.bufferapp.com/snapchat&quot;                     
+##  [8] &quot;blog.bufferapp.com/facebook-tips&quot;                
+##  [9] &quot;open.buffer.com/top-words-of-buffer&quot;             
+## [10] &quot;blog.bufferapp.com/social-media-studies-2016&quot;    
+## 
+## $Philippe
+##  [1] &quot;medium.com/@michael_erasmus/how-i-found-my-ideal-lifestyle-through-working-remotely-deb7ba8be5c9&quot;
+##  [2] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                       
+##  [3] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                         
+##  [4] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                        
+##  [5] &quot;timezone.io/team/buffer&quot;                                                                         
+##  [6] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                            
+##  [7] &quot;open.buffer.com/stop-energy&quot;                                                                     
+##  [8] &quot;open.buffer.com/product&quot;                                                                         
+##  [9] &quot;jobs.bufferapp.com/growth-hacker&quot;                                                                
+## [10] &quot;open.bufferapp.com/job-descriptions-diversity&quot;                                                   
+## 
+## $`Philippe Miguet`
+##  [1] &quot;open.buffer.com/product&quot;                                                                         
+##  [2] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;                                
+##  [3] &quot;open.buffer.com/product-team-evolution&quot;                                                          
+##  [4] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                         
+##  [5] &quot;open.buffer.com/stop-energy&quot;                                                                     
+##  [6] &quot;blog.bufferapp.com/best-time-to-tweet-research&quot;                                                  
+##  [7] &quot;buffer.com/journey&quot;                                                                              
+##  [8] &quot;open.buffer.com/no-office&quot;                                                                       
+##  [9] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                        
+## [10] &quot;medium.com/@michael_erasmus/how-i-found-my-ideal-lifestyle-through-working-remotely-deb7ba8be5c9&quot;
+## 
+## $`Ross Parmly`
+##  [1] &quot;inc.com/jeff-haden/the-7-million-startup-with-zero-managers.html&quot;       
+##  [2] &quot;open.buffer.com/buffer-acquires-respondly&quot;                              
+##  [3] &quot;buffer.com/gifs-for-social-media&quot;                                       
+##  [4] &quot;open.buffer.com/product&quot;                                                
+##  [5] &quot;blog.bufferapp.com/improve-your-marketing-unique-new-ideas&quot;             
+##  [6] &quot;open.buffer.com/stop-energy&quot;                                            
+##  [7] &quot;buffer.com/journey&quot;                                                     
+##  [8] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                               
+##  [9] &quot;open.buffer.com/transparency-timeline&quot;                                  
+## [10] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;
+## 
+## $`Roy Opata Olende`
+##  [1] &quot;open.buffer.com/product&quot;                                                
+##  [2] &quot;open.buffer.com/keep-going&quot;                                             
+##  [3] &quot;open.buffer.com/transparent-product-roadmap&quot;                            
+##  [4] &quot;open.buffer.com/wholeness&quot;                                              
+##  [5] &quot;open.buffer.com/stop-energy&quot;                                            
+##  [6] &quot;open.buffer.com/buffer-acquires-respondly&quot;                              
+##  [7] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;
+##  [8] &quot;buffer.com/journey&quot;                                                     
+##  [9] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                               
+## [10] &quot;open.buffer.com/top-words-of-buffer&quot;                                    
+## 
+## $`Spencer Lanoue`
+##  [1] &quot;youtube.com/watch&quot;                                                      
+##  [2] &quot;medium.com/m/global-identity&quot;                                           
+##  [3] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;
+##  [4] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;   
+##  [5] &quot;open.buffer.com/buffer-acquires-respondly&quot;                              
+##  [6] &quot;open.buffer.com/wholeness&quot;                                              
+##  [7] &quot;open.buffer.com/transparent-product-roadmap&quot;                            
+##  [8] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                               
+##  [9] &quot;twitter.com/getrespond/status/775966987633778688/photo/1&quot;               
+## [10] &quot;open.buffer.com/feedback&quot;                                               
+## 
+## $`Stephanie Lee`
+##  [1] &quot;overflow.buffer.com/2016/02/22/timezones&quot;      
+##  [2] &quot;open.buffer.com/transparent-product-roadmap&quot;   
+##  [3] &quot;open.buffer.com/buffer-acquires-respondly&quot;     
+##  [4] &quot;open.buffer.com/product&quot;                       
+##  [5] &quot;medium.com/m/global-identity&quot;                  
+##  [6] &quot;buffer.com/journey&quot;                            
+##  [7] &quot;open.buffer.com/holidays-international-startup&quot;
+##  [8] &quot;open.buffer.com/wholeness&quot;                     
+##  [9] &quot;open.buffer.com/feedback&quot;                      
+## [10] &quot;open.buffer.com/equal-pay&quot;                     
+## 
+## $`Steve Dixon`
+##  [1] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                                     
+##  [2] &quot;open.buffer.com/product&quot;                                                                                  
+##  [3] &quot;medium.com/m/global-identity&quot;                                                                             
+##  [4] &quot;open.buffer.com/feedback&quot;                                                                                 
+##  [5] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+##  [6] &quot;open.buffer.com/wholeness&quot;                                                                                
+##  [7] &quot;open.buffer.com/remote-working-rv-part-one&quot;                                                               
+##  [8] &quot;open.buffer.com/remote-work-retreats&quot;                                                                     
+##  [9] &quot;producthunt.com/tech/customer-support-academy&quot;                                                            
+## [10] &quot;open.buffer.com/stop-energy&quot;                                                                              
+## 
+## $`Steven Cheng`
+##  [1] &quot;buffer.com/journey&quot;                                                                                   
+##  [2] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                            
+##  [3] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                                             
+##  [4] &quot;blog.bufferapp.com/optimal-work-time-how-long-should-we-work-every-day-the-science-of-mental-strength&quot;
+##  [5] &quot;open.buffer.com/product&quot;                                                                              
+##  [6] &quot;open.buffer.com/holidays-international-startup&quot;                                                       
+##  [7] &quot;timezone.io/team/buffer&quot;                                                                              
+##  [8] &quot;open.buffer.com/wholeness&quot;                                                                            
+##  [9] &quot;medium.com/m/global-identity&quot;                                                                         
+## [10] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                          
+## 
+## $`Suprasanna Mishra`
+##  [1] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                                
+##  [2] &quot;open.buffer.com/stop-energy&quot;                                                                              
+##  [3] &quot;opensource.com/open-organization/16/5/buffer-open-culture&quot;                                                
+##  [4] &quot;open.buffer.com/product&quot;                                                                                  
+##  [5] &quot;open.buffer.com/holidays-international-startup&quot;                                                           
+##  [6] &quot;open.buffer.com/feedback&quot;                                                                                 
+##  [7] &quot;overflow.buffer.com/2016/03/31/how-we-saved-132k-a-year-by-spring-cleaning-our-back-end&quot;                  
+##  [8] &quot;open.buffer.com/growth&quot;                                                                                   
+##  [9] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+## [10] &quot;open.buffer.com/wholeness&quot;                                                                                
+## 
+## $`Thomas Alexander Dunn`
+##  [1] &quot;blog.bufferapp.com/how-to-create-manage-facebook-business-page&quot;
+##  [2] &quot;buffer.com/journey&quot;                                            
+##  [3] &quot;open.buffer.com/buffer-acquires-respondly&quot;                     
+##  [4] &quot;open.bufferapp.com/buffer-distributed-team-how-we-work&quot;        
+##  [5] &quot;blog.bufferapp.com/social-media-strategy&quot;                      
+##  [6] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                      
+##  [7] &quot;blog.bufferapp.com/how-to-save-time-on-social-media&quot;           
+##  [8] &quot;medium.com/m/global-identity&quot;                                  
+##  [9] &quot;buffer.com/gifs-for-social-media&quot;                              
+## [10] &quot;blog.bufferapp.com/idea-curation-get-more-ideas&quot;               
+## 
+## $`Tigran Hakobyan`
+##  [1] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                               
+##  [2] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;   
+##  [3] &quot;medium.com/m/global-identity&quot;                                           
+##  [4] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;
+##  [5] &quot;buffer.com/journey&quot;                                                     
+##  [6] &quot;producthunt.com/tech/customer-support-academy&quot;                          
+##  [7] &quot;open.buffer.com/buffer-acquires-respondly&quot;                              
+##  [8] &quot;open.buffer.com/transparent-product-roadmap&quot;                            
+##  [9] &quot;opensource.com/open-organization/16/5/buffer-open-culture&quot;              
+## [10] &quot;open.buffer.com/wholeness&quot;                                              
+## 
+## $`todd balsley`
+##  [1] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                                  
+##  [2] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                       
+##  [3] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                
+##  [4] &quot;blog.bufferapp.com/hello-respond&quot;                                                           
+##  [5] &quot;open.bufferapp.com/startup-mindset&quot;                                                         
+##  [6] &quot;open.buffer.com/product&quot;                                                                    
+##  [7] &quot;open.buffer.com/remote-working-rv-part-one&quot;                                                 
+##  [8] &quot;opensource.com/open-organization/16/5/buffer-open-culture&quot;                                  
+##  [9] &quot;open.buffer.com/wholeness&quot;                                                                  
+## [10] &quot;overflow.buffer.com/2016/02/11/slack-meet-looker-an-experiment-in-bringing-data-to-the-team&quot;
+## 
+## $`Tom Redman`
+##  [1] &quot;open.buffer.com/transparent-product-roadmap&quot;                                                              
+##  [2] &quot;open.buffer.com/stop-energy&quot;                                                                              
+##  [3] &quot;theguardian.com/sustainable-business/2016/jun/06/silicon-valley-diversity-problem-tech-industry-solutions&quot;
+##  [4] &quot;medium.com/@sunils34/forward-motion-stop-energy-at-startups-c01624b7989&quot;                                  
+##  [5] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;                                     
+##  [6] &quot;buffer.com/gifs-for-social-media&quot;                                                                         
+##  [7] &quot;blog.bufferapp.com/optimal-work-time-how-long-should-we-work-every-day-the-science-of-mental-strength&quot;    
+##  [8] &quot;open.buffer.com/no-office&quot;                                                                                
+##  [9] &quot;open.buffer.com/feedback&quot;                                                                                 
+## [10] &quot;julheimer.com/blog/2015/4/23/what-i-learned-doing-customer-support-exclusively-for-a-week&quot;                
+## 
+## $`Tyler wanlass`
+##  [1] &quot;overflow.buffer.com/2016/02/22/timezones&quot;                                           
+##  [2] &quot;open.buffer.com/buffer-acquires-respondly&quot;                                          
+##  [3] &quot;medium.com/m/global-identity&quot;                                                       
+##  [4] &quot;open.buffer.com/transparent-product-roadmap&quot;                                        
+##  [5] &quot;buffer.com/respond/blog/why-everyone-at-respond-does-customer-support&quot;              
+##  [6] &quot;buffer.com/respond/blog/eating-our-own-dogfood-building-a-support-tool-we-use-daily&quot;
+##  [7] &quot;producthunt.com/tech/customer-support-academy&quot;                                      
+##  [8] &quot;buffer.com/respond/blog/social-media-customer-service&quot;                              
+##  [9] &quot;open.buffer.com/feedback&quot;                                                           
+## [10] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;</code></pre>
+<p>It looks like there is <strong>a lot</strong> of overlap, and this makes sense. We all work for the same company and share similar things. I imagine that our similarity scores are all quite high. Notice all of the buffer blog posts in there. :)</p>
+</div>
+<div id="next-steps" class="section level2">
+<h2>Next steps</h2>
+<p>In the future I would love to build a recommender with a much larger dataset with a wider range of users. Proper training/testing and evaluation methods should also be utilized. I would also love to utilize time as a factor – I would be more likely to share a new article than an old one, so that could be factored in as well.</p>
+</div>
