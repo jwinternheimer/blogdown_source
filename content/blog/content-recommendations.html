@@ -12,12 +12,12 @@ title: "Simple Content Recommendations in R"
 <p>In this analysis we’ll build a simple recommendation engine with the <code>recommenderlab</code> R package, using collaborative filtering techniques. To keep it simple, we’ll only look at updates shared by Buffer team members.</p>
 <div id="collaborative-filtering" class="section level3">
 <h3>Collaborative filtering</h3>
-<p>The basic idea behind collaborative filtering is that, if two people share similar interests (e.g. they’ve shared the same links), they will also share the same similar interests in the future. For example, if Rupert and I have similar histories in terms of the links that we’ve shared, it would make sense to suggests links that Rupert has shared (that I haven’t) to me.</p>
-<p>In this type of recommendation, ltering items from a large set of alternatives is done collaboratively between users preferences. Such systems are called collaborative ltering recommender systems.</p>
+<p>The basic idea behind collaborative filtering is that, if two people share similar interests (e.g. they’ve shared the same links), they will also share similar interests in the future. For example, if Rupert and I have similar histories in terms of the links that we’ve shared, it would make sense to recommend links that Rupert has shared (that I haven’t).</p>
+<p>In this type of recommendation, filtering items from a large set of alternatives is done collaboratively between users preferences. Such systems are called collaborative filtering recommender systems.</p>
 <p>There are two sub-branches of collaborative filtering that are worth mentioning:</p>
 <ul>
-<li><strong>Item-based</strong>: This recommends to a user the items that are most similar to the user’s purchases.</li>
-<li><strong>User-based</strong>: This recommends to a user the items that are the most preferred by similar users.</li>
+<li><p><strong>Item-based</strong>: This recommends to a user the items that are most similar to the user’s purchases.</p></li>
+<li><p><strong>User-based</strong>: This recommends to a user the items that are the most preferred by similar users.</p></li>
 </ul>
 </div>
 <div id="data-mining-and-eda" class="section level3">
@@ -29,7 +29,7 @@ title: "Simple Content Recommendations in R"
 <p>Let’s collect all of the links shared by Buffer team members. The dataset will only include two columns, <code>name</code> and <code>url</code>.</p>
 <pre class="r"><code># Read csv of updates
 updates &lt;- read.csv(&quot;~/Downloads/buffer_updates.csv&quot;, header = TRUE)</code></pre>
-<p>Alright, we have 98 thousand links from 72 team members!</p>
+<p>Alright, we have over 98 thousand links from 72 team members.</p>
 </div>
 <div id="data-tidying" class="section level2">
 <h2>Data tidying</h2>
@@ -54,13 +54,16 @@ updates &lt;- updates %&gt;%
 </div>
 <div id="recommender" class="section level2">
 <h2>Recommender</h2>
-<p>The <code>recommenderlabd</code> package can be used for collaborative filtering. To get started, we need to change the structure of our dataset to a wide matrix, which columns representing urls and rows representing users.</p>
+<p>The <code>recommenderlab</code> package can be used for collaborative filtering. To get started, we need to change the structure of our dataset to a wide matrix, which columns representing urls and rows representing users.</p>
 <p>Our data is binary (i.e. either 1 or 0). If a user shared the url, then it’s a 1, otherwise it’s 0. We’ll use the <code>reshape2</code> package to restructure the data.</p>
 <pre class="r"><code># Cast as a giant matrix
 updates_cast &lt;- acast(updates, name ~ clean_url)
 umatrix &lt;- as.matrix(updates_cast)
 
-# Set as a binary rating matrix
+# Replace NA values with 0
+umatrix[is.nan(umatrix)] &lt;- 0
+
+# Set as a binary rating matrix type
 binary_matrix = as(umatrix, &#39;binaryRatingMatrix&#39;)
 
 binary_matrix</code></pre>
@@ -78,7 +81,7 @@ binary_matrix</code></pre>
 <li>Re-recommend liked items (RERECOMMEND)</li>
 <li>Hybrid recommendations (HybridRecommender)</li>
 </ul>
-<p>We’ll use the <code>UBCF</code> algorithm in this small analysis, and we won’t use the best practices of splitting the data into training and testing sets. We’ll only use the eyeball test to evaluate the model’s performance.</p>
+<p>We’ll use the <code>UBCF</code> algorithm in this analysis, and we won’t use the best practices of splitting the data into training and testing sets. We’ll only use the eyeball test to evaluate the model’s performance.</p>
 <pre class="r"><code># Build user-based collaborative filtering recommender
 recommender &lt;- Recommender(binary_matrix, method = &quot;UBCF&quot;)
 
@@ -951,7 +954,7 @@ pred_list</code></pre>
 ##  [8] &quot;buffer.com/respond/blog/social-media-customer-service&quot;                              
 ##  [9] &quot;open.buffer.com/feedback&quot;                                                           
 ## [10] &quot;medium.com/@rdutel/200-startups-hiring-remotely-in-2016-1d4299e5163f&quot;</code></pre>
-<p>It looks like there is <strong>a lot</strong> of overlap, and this makes sense. We all work for the same company and share similar things. I imagine that our similarity scores are all quite high. Notice all of the buffer blog posts in there. :)</p>
+<p>It looks like there is quite a lot of overlap, and this makes sense. We all work for the same company and share similar things. I imagine that our similarity scores are all quite high. Notice all of the buffer blog posts in there. :)</p>
 </div>
 <div id="next-steps" class="section level2">
 <h2>Next steps</h2>

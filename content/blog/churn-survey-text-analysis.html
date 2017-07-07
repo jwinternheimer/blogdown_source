@@ -343,16 +343,16 @@ inspect(dtm_new)</code></pre>
 ## Sample             :
 ##       Terms
 ## Docs   account buffer business media plan post posts service social time
-##   1029       0      0        0     0    0    0     0       0      0    0
-##   1378       0      0        0     0    0    0     0       0      0    0
-##   1540       0      0        0     0    0    0     0       0      0    0
-##   1567       0      0        0     0    0    0     0       0      0    0
-##   1621       0      0        0     0    0    0     0       0      0    0
-##   198        0      0        0     0    0    0     0       0      0    0
-##   276        0      0        0     0    0    0     0       0      0    0
-##   290        0      0        0     0    0    0     0       0      0    0
-##   516        0      0        0     0    0    0     0       0      0    0
-##   588        0      0        0     0    0    0     0       0      0    0</code></pre>
+##   1004       0      0        0     0    0    0     0       0      0    0
+##   1017       0      0        0     0    0    0     0       0      0    0
+##   1550       0      0        0     0    0    0     0       0      0    0
+##   236        0      0        0     0    0    0     0       0      0    0
+##   325        0      0        0     0    0    0     0       0      0    0
+##   526        0      0        0     0    0    0     0       0      0    0
+##   610        0      0        0     0    0    0     0       0      0    0
+##   843        0      0        0     0    0    0     0       0      0    0
+##   925        0      0        0     0    0    0     0       0      0    0
+##   926        0      0        0     0    0    0     0       0      0    0</code></pre>
 <pre class="r"><code># Set a seed so that the output of the model is predictable
 lda &lt;- LDA(dtm_new, k = 2, control = list(seed = 1234))
 lda</code></pre>
@@ -367,18 +367,18 @@ lda</code></pre>
 <pre class="r"><code>topics &lt;- tidy(lda, matrix = &quot;beta&quot;)
 topics</code></pre>
 <pre><code>## # A tibble: 6,364 x 3
-##    topic         term         beta
-##    &lt;int&gt;        &lt;chr&gt;        &lt;dbl&gt;
-##  1     1 considerable 6.396168e-05
-##  2     2 considerable 5.520532e-05
-##  3     1     kwantlen 5.297065e-05
-##  4     2     kwantlen 6.621722e-05
-##  5     1        basil 4.878278e-05
-##  6     2        basil 7.041305e-05
-##  7     1          bob 1.016628e-04
-##  8     2          bob 1.743261e-05
-##  9     1        teach 8.670372e-05
-## 10     2        teach 3.242008e-05
+##    topic        term         beta
+##    &lt;int&gt;       &lt;chr&gt;        &lt;dbl&gt;
+##  1     1 polytechnic 6.100956e-05
+##  2     2 polytechnic 5.815818e-05
+##  3     1       basil 5.008211e-05
+##  4     2       basil 6.914381e-05
+##  5     1         bob 4.597045e-05
+##  6     2         bob 7.327735e-05
+##  7     1       teach 1.000432e-04
+##  8     2       teach 1.891672e-05
+##  9     1     proving 8.426501e-05
+## 10     2     proving 3.477891e-05
 ## # ... with 6,354 more rows</code></pre>
 <p>This has turned the model into a one-topic-per-term-per-row format. For each combination, the model computes the probability of that term being generated from that topic.</p>
 <p>We could use <code>dplyr</code>’s <code>top_n()</code> to find the 10 terms that are most common within each topic.</p>
