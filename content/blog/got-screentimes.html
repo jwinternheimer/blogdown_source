@@ -1,0 +1,102 @@
+---
+date: 2017-07-08T09:40:56-04:00
+subtitle: ""
+tags: []
+title: "Game of Thrones: Who Steals the Show?"
+---
+
+
+
+<p>I was inspired by <a href="https://looker.com/blog/data-of-thrones-part-i">this analysis</a> done by the folks of Looker, which looks at the amount of screentime different characters get in the Game of Thrones series.</p>
+<p>The dataset they used comes from <a href="https://data.world/aendrew/game-of-thrones-screen-times">data world</a> and an <a href="http://www.imdb.com/list/ls076752033/">imdb list</a>. I’m grateful to the people that have collected and shared this data.</p>
+<p>The dataset includes 191 named characters, the amount of screentime they have (in minutes), and the number of episodes they appear in. I manually entered the gender of the characters. I tried to be careful to look up the character if I was unsure of the gender, but I may have made some mistakes – please let me know if you spot any!</p>
+<div id="data-collection-and-tidying" class="section level2">
+<h2>Data collection and tidying</h2>
+<p>Let’s read the csv file into R.</p>
+<pre class="r"><code># Read csv
+screentimes &lt;- read.csv(&quot;~/Downloads/got_screentimes.csv&quot;, header = T)</code></pre>
+<p>Now we need to just do a tiny bit of tidying.</p>
+<pre class="r"><code># Change episodes to numeric vector
+screentimes$episodes &lt;- as.numeric(as.character(screentimes$episodes))</code></pre>
+<pre><code>## Warning: NAs introduced by coercion</code></pre>
+<p>There are characters with <code>unspecified</code> set as the value in <code>episodes</code>. We can probably estimate the number of episodes these characters appear in, based on the amount of screentime they’ve gotten. Let’s plot the relationship between <code>screentime</code> and <code>episodes</code>.</p>
+<pre class="r"><code># Plot screentime and episodes
+ggplot(screentimes) +
+  geom_point(aes(x = episodes, y = screentime), position = &#39;jitter&#39;, alpha = 0.5, na.rm = TRUE) +
+  stat_smooth(aes(x = episodes, y = screentime), method = &#39;loess&#39;, na.rm = TRUE)</code></pre>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>There is a clear positive relationship between the two that appears non-linear. We can therefore use the <code>screentime</code> variable as a <code>predictor</code> of <code>episodes</code>.</p>
+<p>Let’s get the values of that smoother, which uses <a href="https://en.wikipedia.org/wiki/Local_regression">local regression</a>, to estimate the episodes value.</p>
+<pre class="r"><code># Get estimates for episodes
+smooth_vals = predict(loess(episodes ~ screentime, data = screentimes), screentimes$screentime)
+
+# Input in dataframe
+screentimes$pred_episodes &lt;- smooth_vals
+
+# Replace NAs with the predictions
+screentimes$episodes[is.na(screentimes$episodes)] &lt;- screentimes$pred_episodes[is.na(screentimes$episodes)]</code></pre>
+<p>Great, we’re all set for some exploratory analysis!</p>
+</div>
+<div id="exploratory-analysis" class="section level2">
+<h2>Exploratory analysis</h2>
+<p>We’ll start by focusing on gender. How many characters of each gender are included in this dataset?</p>
+<pre class="r"><code>ggplot(screentimes) +
+  geom_bar(aes(x = gender, fill = gender)) +
+  labs(x = &#39;&#39;, y = &#39;&#39;, title = &#39;Number of Characters by Gender&#39;) +
+  guides(fill = FALSE)</code></pre>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>Wow, there are 137 men characters and only 54 women!</p>
+<div id="total-screentime" class="section level3">
+<h3>Total Screentime</h3>
+<p>We’ll start by looking at the top characters by screentime.</p>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>Tyrion has had the most screentime, which is awesome. He has more than 90 minutes <em>more</em> screentime than his sister Cersei. Let’s now see which characters have been in the most episodes – I supoose the graph will look similar.</p>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>Tyrion has been present in the most episodes, followed by Cersei and Jon Snow. Now let’s group the data by gender and calculate the cumulative screentime for men and women.</p>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>These plots seem to suggest that men dominate the show. We have to remember, however, that there are many more men in the show than women. Think of that what you will. It is still an interesting data problem.</p>
+<p>It would be useful for us to look at <em>the distribution</em> of screentime for men and women in the show.</p>
+<pre class="r"><code># Plot distribution of screentime
+ggplot(screentimes) +
+  geom_density(aes(x = screentime, color = gender)) +
+  labs(x = &quot;Screentime in Minutes&quot;, y = &quot;Density&quot;, color = &quot;Gender&quot;)</code></pre>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>As we can see in the density plot above, the distribution is skewed to the left. There are many supporting characters with only a few minutes of screentime, and a few main characters that get most of the screentime. This is what we would expect.</p>
+<p>Let’s also look at the CDFs of these distributions.</p>
+<pre class="r"><code># Plot distribution of screentime
+ggplot(screentimes) +
+  stat_ecdf(aes(x = screentime, color = gender)) +
+  scale_x_continuous(breaks = seq(0, 300, 60)) +
+  labs(x = &quot;Screentime in Minutes&quot;, y = &quot;&quot;, title = &quot;CDF of Screentime&quot;, color = &quot;Gender&quot;)</code></pre>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+<p>The distribution of screentime is quite similar for men and women. In fact, the percentage of women with 90-210 minutes of screentime is slightly higher than the percentage of men with that much screentime. This is also partially due to the fact that there is a longer list of men in the character list.</p>
+</div>
+<div id="screentime-per-episode" class="section level3">
+<h3>Screentime per episode</h3>
+<p>We all know Game of Thrones likes to kill characters off. We might therefore want to look at screentime <em>per episode</em> for each character. The Looker analysis did a good job of this. Let’s go ahead and create the <code>screentime_per_episode</code> variable.</p>
+<pre class="r"><code>screentimes &lt;- screentimes %&gt;%
+  mutate(screentime_per_episode = screentime / episodes)</code></pre>
+<p>Now let’s plot the distribution of this new variable.</p>
+<pre class="r"><code># Plot distribution of screentime
+ggplot(screentimes) +
+  geom_density(aes(x = screentime_per_episode, color = gender)) +
+  labs(x = &quot;Screentime Per Episode in Minutes&quot;, y = &quot;Density&quot;, color = &quot;Gender&quot;)</code></pre>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>The distributions look slightly more gaussian in shape, but are still skewed to the right. The distribution for men is shifted slightly to the left, however the main female characters still make up for it. Let’s take a look at the CDFs.</p>
+<pre class="r"><code># Plot distribution of screentime
+ggplot(screentimes) +
+  stat_ecdf(aes(x = screentime_per_episode, color = gender)) +
+  labs(x = &quot;Screentime in Minutes&quot;, y = &quot;&quot;, title = &quot;CDF of Screentime&quot;, color = &quot;Gender&quot;)</code></pre>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
+<p>The distributions are quite similar, as we’ve just seen. Let’s look at <strong>average screentime per episode</strong> for both men and women.</p>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+<p>As we can see in these graphs, the average and median screentime <em>per episode</em> is quite similar for men and women in the show. Let’s sort our characters by <code>screentime_per_episode</code>.</p>
+<p><img src="/blog/got-screentimes_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+<p>Wow. Hey Ned Stark! He doesn’t appear in many episodes, but he features heavily when he does. John Snow and Tyrion both tend to dominate episodes they appear in (when alive). It’s also interesting to see characters like Mancy Rayder and Oberyn Martell in this list above characters like Arya and Cersei.</p>
+</div>
+</div>
+<div id="conclusions-and-next-steps" class="section level2">
+<h2>Conclusions and next steps</h2>
+<p>Screentime is not quite distributed equally between men and women in Game of Thrones, which is due in part to the fact that there are so many more male characters in the show. The women that are featured do get a fair amount of screentime and are featured in as many episodes as the men.</p>
+<p>In the future I’ll estimate the effect that gender has on screentime and episodes, and I’ll break down screntime by house (i.e. Lannister, Stark, Baratheon, Targaryen)!</p>
+</div>
