@@ -2,6 +2,7 @@
 date: 2017-07-08T09:40:56-04:00
 subtitle: ""
 tags: []
+type: "post"
 title: "Game of Thrones: Who Steals the Show?"
 ---
 
