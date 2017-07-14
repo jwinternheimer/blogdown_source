@@ -1,0 +1,110 @@
+---
+date: 2017-07-14T09:34:20-04:00
+subtitle: ""
+tags: []
+type: "post"
+title: "Analyzing Product with Support Tickets"
+---
+
+
+
+<p>Customer support and advocacy play important roles in driving Buffer forward. We don’t just want to provide support to customers in need – we try to use signals and common themes from those conversations to influence decision making on the product team.</p>
+<p>The “Pause Queue” button is one recent, small example of how conversations with customers have led to changes in the product.</p>
+<div class="figure">
+<img src="http://i.imgur.com/htQDRr6.png" />
+
+</div>
+<p>To keep these signals organized, we introduced <em>area tags</em> to our support workflow within Helpscout. Each tag included in a conversation is associated with an area of the product.</p>
+<div class="figure">
+<img src="http://i.imgur.com/oVrclFU.png" />
+
+</div>
+<p>In this analysis, we’ll explore these area tags and how they have evolved over time.</p>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>Much of our Helpscout data is conveneiently modeled <a href="https://looker.buffer.com/looks/3965?toggle=dat,vis">in Looker</a>, so we’ll use the <code>buffer</code> package’s <code>get_look()</code> function to pull in the data from Looker’s API.</p>
+<pre class="r"><code># Get data from Looker
+convos &lt;- get_look(3965)</code></pre>
+<pre><code>## Loading required package: httr</code></pre>
+<p>Alright, we have over 45 thousand conversations with area tags! Let’s tidy up the data and get it ready for analysis.</p>
+</div>
+<div id="data-tidying" class="section level2">
+<h2>Data tidying</h2>
+<p>There are a few small changes we need to make to prep the data for analysis. We’ll change the column names to be more accessible, change the dates to date type objects, and set the subject to a character vector.</p>
+<pre class="r"><code># Rename columns
+colnames(convos) &lt;- c(&#39;date&#39;, &#39;week&#39;, &#39;threads&#39;, &#39;id&#39;, &#39;mailbox&#39;, &#39;status&#39;, &#39;subject&#39;, &#39;type&#39; , &#39;area&#39;)
+
+# Set dates as date objects
+convos$date &lt;- as.Date(convos$date, format = &quot;%Y-%m-%d&quot;)
+convos$week &lt;- as.Date(convos$week, format = &quot;%Y-%m-%d&quot;)
+
+# Set subject as character type object
+convos$subject &lt;- as.character(convos$subject)</code></pre>
+<p>There are a couple area tags that can be consolidated. <code>feature request</code> and <code>feature requests</code> can be combined, <code>profile-connection</code> and <code>profile-maintenance</code> and be combined into <code>profiles</code>, <code>composing</code> and <code>composition</code> can be combined into <code>composing</code>, and <code>extension - multiple composer</code> can be dropped.</p>
+<pre class="r"><code># Set area as character vector
+convos$area &lt;- as.character(convos$area)
+
+# Replace feature requests
+convos$area &lt;- gsub(&quot;feature requests&quot;, &quot;feature request&quot;, convos$area)
+
+# Replace profile-connection and profile-maintenance
+convos$area &lt;- gsub(&quot;profile-connection&quot;, &quot;profiles&quot;, convos$area)
+convos$area &lt;- gsub(&quot;profile-maintenance&quot;, &quot;profiles&quot;, convos$area)
+
+# Replace composition
+convos$area &lt;- gsub(&quot;composition&quot;, &quot;composing&quot;, convos$area)
+convos$area &lt;- gsub(&quot;extension - multiple composer&quot;, &quot;composing&quot;, convos$area)
+
+# Set as factor
+convos$area &lt;- as.factor(convos$area)</code></pre>
+<p>Now we’re ready for some exploratory analysis.</p>
+</div>
+<div id="exploratory-analysis" class="section level2">
+<h2>Exploratory analysis</h2>
+<p>Let’s try to get a better understanding of this dataset. We have over 45 thousand conversations – how many do we have for each mailbox?</p>
+<pre class="r"><code># Group by mailbox
+convos %&gt;%
+  count(mailbox, sort = TRUE) %&gt;%
+  filter(n &gt; 100) %&gt;%
+  mutate(mailbox = reorder(mailbox, n)) %&gt;%
+  ggplot(aes(mailbox, n)) +
+  geom_col() +
+  labs(x = &quot;&quot;, y = &quot;&quot;, title = &quot;Conversations by Mailbox&quot;) + 
+  coord_flip()</code></pre>
+<p><img src="content/area-tags_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p>Most of these conversations come from the Buffer, Buffer Paid, Customer Onboarding, and Buffer for Business inboxes. Which tags appear most often?</p>
+<pre class="r"><code># Group by tag
+convos %&gt;%
+  count(area, sort = TRUE) %&gt;%
+  filter(area != &#39;uncategorized&#39;) %&gt;%
+  mutate(area = reorder(area, n)) %&gt;%
+  ggplot(aes(area, n)) +
+  geom_col() +
+  labs(x = &quot;&quot;, y = &quot;&quot;, title = &quot;Conversations by Area Tag&quot;) + 
+  coord_flip()</code></pre>
+<p><img src="content/area-tags_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>Onboarding, posting, billing, user-maintenance, and profiles are the most common area tags. Let’s look at the frequency of these tags over time.</p>
+<p><img src="content/area-tags_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>It’s hard to get a sence with all that’s going on in this graph, so let’s try to make it more readable by graphing each area tag separately.</p>
+<p><img src="content/area-tags_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>As we can see, <code>onboarding</code> and <code>billing</code> seem to appear most frequently in Helpscout conversations. The number of conversations with the <code>onboarding</code> tag seem to be increasing somewhat, while the number of conversations with the <code>scheduling</code> tag seem to be decreasing somewhat.</p>
+<div id="length-of-conversations" class="section level3">
+<h3>Length of conversations</h3>
+<p>Bandwidth on the customer advocacy team is somewhat limited, so it may be important to find that which takes up the most amount of time. We can use <code>threads</code>, which counts the number of threads in each particular conversation, to estimate the amount of time that each area tends to take.</p>
+<p>This may be a crude approach, as threads are not necessarily equal – billing issues may very well be more complex and time-consuming than onboarding issues. Let’s look at the distribution of threads for each area tag.</p>
+<pre><code>## Warning: Removed 2244 rows containing non-finite values (stat_density).</code></pre>
+<p><img src="content/area-tags_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p><img src="content/area-tags_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>The distribution of thread count is quite similar for each tag. Most conversations will only have two, I suppose the initial request and the response. The <code>social media advice</code> tag seems to have a higher-than-average proportion of conversations with only two threads. The <code>org-maintenance</code> tag seems to have a higher proportion of conversations that have a higer number of threads, as does the <code>user-maintenance</code> tag.</p>
+<p>The <code>billing</code> tag also seems to have a higher proportion of conversations with more than two threads. Let’s make another visualization to try to understand the distribution of threads for each area.</p>
+<pre><code>## Warning: Removed 2244 rows containing non-finite values (stat_boxplot).</code></pre>
+<p><img src="content/area-tags_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+<p>The areas with the highest <em>median</em> thread count are <code>API</code>, <code>org-maintenance</code>, and <code>org-setup</code>.</p>
+</div>
+</div>
+<div id="conclusions-and-next-steps" class="section level2">
+<h2>Conclusions and next steps</h2>
+<p>Based on this exploratory analysis, it seems that, of the area tags we utilize now, <code>billing</code>, <code>onboarding</code>, and <code>posting</code> seem to occur the most frequently. The <code>API</code>, <code>org-maintenance</code> and <code>org-setup</code> tags might tend to be associated with longer conversations – which would make sense if they were more technical – but the overall volume is relatively low.</p>
+<p>In the future, I would love to connect these conversations to actual Buffer users, and see which areas cause the most pain for certain user segments. We could identify the areas most challenging to Business customers, and which are most closely associated with events like churn.</p>
+<p>Thanks for reading! Any thoughts, comments, or questions are welcome!</p>
+</div>
