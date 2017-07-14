@@ -92,12 +92,12 @@ convos %&gt;%
 <h3>Length of conversations</h3>
 <p>Bandwidth on the customer advocacy team is somewhat limited, so it may be important to find that which takes up the most amount of time. We can use <code>threads</code>, which counts the number of threads in each particular conversation, to estimate the amount of time that each area tends to take.</p>
 <p>This may be a crude approach, as threads are not necessarily equal – billing issues may very well be more complex and time-consuming than onboarding issues. Let’s look at the distribution of threads for each area tag.</p>
-<pre><code>## Warning: Removed 2244 rows containing non-finite values (stat_density).</code></pre>
+<pre><code>## Warning: Removed 2248 rows containing non-finite values (stat_density).</code></pre>
 <p><img src="content/area-tags_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
 <p><img src="content/area-tags_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
 <p>The distribution of thread count is quite similar for each tag. Most conversations will only have two, I suppose the initial request and the response. The <code>social media advice</code> tag seems to have a higher-than-average proportion of conversations with only two threads. The <code>org-maintenance</code> tag seems to have a higher proportion of conversations that have a higer number of threads, as does the <code>user-maintenance</code> tag.</p>
 <p>The <code>billing</code> tag also seems to have a higher proportion of conversations with more than two threads. Let’s make another visualization to try to understand the distribution of threads for each area.</p>
-<pre><code>## Warning: Removed 2244 rows containing non-finite values (stat_boxplot).</code></pre>
+<pre><code>## Warning: Removed 2248 rows containing non-finite values (stat_boxplot).</code></pre>
 <p><img src="content/area-tags_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
 <p>The areas with the highest <em>median</em> thread count are <code>API</code>, <code>org-maintenance</code>, and <code>org-setup</code>.</p>
 </div>
