@@ -133,7 +133,7 @@ Bandwidth on the customer advocacy team is somewhat limited, so it may be import
 
 This may be a crude approach, as threads are not necessarily equal -- billing issues may very well be more complex and time-consuming than onboarding issues. Let's look at the distribution of threads for each area tag.
 
-```{r echo = FALSE}
+```{r echo = FALSE, warning = FALSE, message = FALSE}
 ggplot(convos, aes(x = threads)) +
   geom_density() +
   facet_wrap(~ area, nrow = 4) +
@@ -159,7 +159,7 @@ The distribution of thread count is quite similar for each tag. Most conversatio
 
 The `billing` tag also seems to have a higher proportion of conversations with more than two threads. Let's make another visualization to try to understand the distribution of threads for each area.
 
-```{r echo = FALSE}
+```{r echo = FALSE, warning = FALSE, message = FALSE}
 ggplot(convos) +
   geom_boxplot(aes(x = area, y = threads)) +
   scale_y_continuous(limits = c(0, 10), breaks = seq(0, 10, 2)) +
