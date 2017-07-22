@@ -94,12 +94,12 @@ head(segment_words)</code></pre>
 <pre><code>## # A tibble: 6 x 4
 ##                       type    word     n total
 ##                     &lt;fctr&gt;   &lt;chr&gt; &lt;int&gt; &lt;int&gt;
-## 1 awesome_downgrade_survey  buffer   492 12440
-## 2 awesome_downgrade_survey  social   284 12440
-## 3 awesome_downgrade_survey    plan   259 12440
-## 4 awesome_downgrade_survey service   215 12440
-## 5 awesome_downgrade_survey   media   213 12440
-## 6 awesome_downgrade_survey    time   198 12440</code></pre>
+## 1 awesome_downgrade_survey  buffer   535 13625
+## 2 awesome_downgrade_survey  social   308 13625
+## 3 awesome_downgrade_survey    plan   275 13625
+## 4 awesome_downgrade_survey service   236 13625
+## 5 awesome_downgrade_survey   media   233 13625
+## 6              exit_survey account   230  4891</code></pre>
 <p>There is one row in this data frame for each word-segment combination. <code>n</code> is the number of times that word is used for that segment and total is the total number of words in the segment’s comments. ## The <code>bind_tf_idf</code> function The idea of tf-idf is to find the important words for the content of each collection of comments by decreasing the weight for commonly used words and increasing the weight for words that are not used very much in an entire collection of documents, in this case all NPS comments.</p>
 <blockquote>
 <p>Calculating tf-idf attempts to find the words that are important (i.e., common) in a text, but not too common.</p>
@@ -110,40 +110,40 @@ segment_words &lt;- segment_words %&gt;%
   bind_tf_idf(word, type, n)
 
 segment_words</code></pre>
-<pre><code>## # A tibble: 5,072 x 7
-##                        type    word     n total         tf       idf
-##                      &lt;fctr&gt;   &lt;chr&gt; &lt;int&gt; &lt;int&gt;      &lt;dbl&gt;     &lt;dbl&gt;
-##  1 awesome_downgrade_survey  buffer   492 12440 0.03954984 0.2231436
-##  2 awesome_downgrade_survey  social   284 12440 0.02282958 0.2231436
-##  3 awesome_downgrade_survey    plan   259 12440 0.02081994 0.2231436
-##  4 awesome_downgrade_survey service   215 12440 0.01728296 0.2231436
-##  5 awesome_downgrade_survey   media   213 12440 0.01712219 0.2231436
-##  6 awesome_downgrade_survey    time   198 12440 0.01591640 0.2231436
-##  7              exit_survey account   196  4419 0.04435393 0.2231436
-##  8 awesome_downgrade_survey   posts   194 12440 0.01559486 0.2231436
-##  9 awesome_downgrade_survey    post   188 12440 0.01511254 0.2231436
-## 10 awesome_downgrade_survey    love   165 12440 0.01326367 0.2231436
-## # ... with 5,062 more rows, and 1 more variables: tf_idf &lt;dbl&gt;</code></pre>
+<pre><code>## # A tibble: 5,405 x 7
+##                        type     word     n total         tf       idf
+##                      &lt;fctr&gt;    &lt;chr&gt; &lt;int&gt; &lt;int&gt;      &lt;dbl&gt;     &lt;dbl&gt;
+##  1 awesome_downgrade_survey   buffer   535 13625 0.03926606 0.2231436
+##  2 awesome_downgrade_survey   social   308 13625 0.02260550 0.2231436
+##  3 awesome_downgrade_survey     plan   275 13625 0.02018349 0.2231436
+##  4 awesome_downgrade_survey  service   236 13625 0.01732110 0.2231436
+##  5 awesome_downgrade_survey    media   233 13625 0.01710092 0.2231436
+##  6              exit_survey  account   230  4891 0.04702515 0.2231436
+##  7 awesome_downgrade_survey     time   217 13625 0.01592661 0.2231436
+##  8 awesome_downgrade_survey    posts   213 13625 0.01563303 0.2231436
+##  9 awesome_downgrade_survey     post   197 13625 0.01445872 0.2231436
+## 10 awesome_downgrade_survey business   188 13625 0.01379817 0.2231436
+## # ... with 5,395 more rows, and 1 more variables: tf_idf &lt;dbl&gt;</code></pre>
 <p>The <code>idf</code> and <code>tf_idf</code> will be 0 for extremely common words like “the” and “a”. We’ve already removed these stop words from our dataset.</p>
 <p>Let’s look at words with high <code>tf_idf</code> values.</p>
 <pre class="r"><code># Look at high tf_idf value words
 segment_words %&gt;%
   select(-total) %&gt;%
   arrange(desc(tf_idf))</code></pre>
-<pre><code>## # A tibble: 5,072 x 6
+<pre><code>## # A tibble: 5,405 x 6
 ##                                 type      word     n          tf       idf
 ##                               &lt;fctr&gt;     &lt;chr&gt; &lt;int&gt;       &lt;dbl&gt;     &lt;dbl&gt;
-##  1 business_downgrade_awesome_survey      plan    32 0.054888508 0.2231436
-##  2                       exit_survey   account   196 0.044353926 0.2231436
-##  3                       exit_survey      page    43 0.009730708 0.9162907
-##  4          awesome_downgrade_survey    buffer   492 0.039549839 0.2231436
-##  5 business_downgrade_awesome_survey  business    23 0.039451115 0.2231436
-##  6                       exit_survey instagram    75 0.016972166 0.5108256
-##  7 business_downgrade_awesome_survey      jump     3 0.005145798 1.6094379
-##  8             business_churn_survey    buffer    50 0.032701112 0.2231436
-##  9                       exit_survey    buffer   143 0.032360263 0.2231436
-## 10                       exit_survey       app    54 0.012219959 0.5108256
-## # ... with 5,062 more rows, and 1 more variables: tf_idf &lt;dbl&gt;</code></pre>
+##  1 business_downgrade_awesome_survey      plan    33 0.054365733 0.2231436
+##  2                       exit_survey   account   230 0.047025148 0.2231436
+##  3                       exit_survey instagram    85 0.017378859 0.5108256
+##  4                       exit_survey      page    47 0.009609487 0.9162907
+##  5          awesome_downgrade_survey    buffer   535 0.039266055 0.2231436
+##  6 business_downgrade_awesome_survey  business    23 0.037891269 0.2231436
+##  7 business_downgrade_awesome_survey      jump     3 0.004942339 1.6094379
+##  8             business_churn_survey    buffer    54 0.032258065 0.2231436
+##  9                       exit_survey    buffer   156 0.031895318 0.2231436
+## 10                       exit_survey       app    59 0.012062973 0.5108256
+## # ... with 5,395 more rows, and 1 more variables: tf_idf &lt;dbl&gt;</code></pre>
 <p>Now let’s visualize these high <code>tf_idf</code> words for each segment of responders.</p>
 <p><img src="/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
 <p>The words that appear in these graphs appear more frequently in the specific survey type than they do in the other surveys. I think we can ignore “buffer”. The word “plan” seems to appear often in each survey <em>except</em> the exit survey as well.</p>
@@ -167,20 +167,20 @@ head(bigrams$bigram)</code></pre>
 <pre class="r"><code># Count the most common bigrams
 bigrams %&gt;%
   count(bigram, sort = TRUE)</code></pre>
-<pre><code>## # A tibble: 23,611 x 2
+<pre><code>## # A tibble: 25,328 x 2
 ##          bigram     n
 ##           &lt;chr&gt; &lt;int&gt;
-##  1    not using   273
-##  2 social media   270
-##  3     using it   237
-##  4      i don&#39;t   233
-##  5         i am   214
-##  6    no longer   189
-##  7       use it   181
-##  8       i have   171
-##  9   don&#39;t need   169
-## 10      need to   161
-## # ... with 23,601 more rows</code></pre>
+##  1 social media   296
+##  2    not using   294
+##  3     using it   261
+##  4      i don&#39;t   249
+##  5         i am   240
+##  6    no longer   204
+##  7       use it   194
+##  8       i have   191
+##  9   don&#39;t need   183
+## 10      need to   174
+## # ... with 25,318 more rows</code></pre>
 <p>As we might expect, a lot of the most common bigrams are groups of common words. This is a useful time to use tidyr’s <code>separate()</code>, which splits a column into multiple based on a delimiter. This lets us separate it into two columns, “word1” and “word2”, at which point we can remove cases where either is a stop-word.</p>
 <pre class="r"><code># Separate words in bigrams
 separated &lt;- bigrams %&gt;%
@@ -204,20 +204,20 @@ bigram_counts &lt;- filtered %&gt;%
   count(word1, word2, sort = TRUE)
 
 bigram_counts</code></pre>
-<pre><code>## # A tibble: 14,340 x 3
+<pre><code>## # A tibble: 15,460 x 3
 ##      word1  word2     n
 ##      &lt;chr&gt;  &lt;chr&gt; &lt;int&gt;
-##  1     not  using   273
-##  2  social  media   270
-##  3   don&#39;t   need   169
-##  4      be   back   151
-##  5   don&#39;t    use   114
-##  6 awesome   plan   110
-##  7   thank    you    89
-##  8   using buffer    84
-##  9    love buffer    80
-## 10   don&#39;t   have    71
-## # ... with 14,330 more rows</code></pre>
+##  1  social  media   296
+##  2     not  using   294
+##  3   don&#39;t   need   183
+##  4      be   back   172
+##  5   don&#39;t    use   123
+##  6 awesome   plan   115
+##  7   thank    you    94
+##  8   using buffer    90
+##  9    love buffer    84
+## 10   don&#39;t   have    78
+## # ... with 15,450 more rows</code></pre>
 <p>In other analyses, we may want to work with the recombined words. tidyr’s <code>unite()</code> function is the inverse of separate(), and lets us recombine the columns into one.</p>
 <pre class="r"><code># Reunite the words
 bigrams_united &lt;- filtered %&gt;%
@@ -230,20 +230,20 @@ head(bigrams_united$bigram)</code></pre>
 <pre class="r"><code># Find most common bigrams
 bigrams_united %&gt;%
   count(bigram, sort = TRUE)</code></pre>
-<pre><code>## # A tibble: 14,340 x 2
+<pre><code>## # A tibble: 15,460 x 2
 ##          bigram     n
 ##           &lt;chr&gt; &lt;int&gt;
-##  1    not using   273
-##  2 social media   270
-##  3   don&#39;t need   169
-##  4      be back   151
-##  5    don&#39;t use   114
-##  6 awesome plan   110
-##  7    thank you    89
-##  8 using buffer    84
-##  9  love buffer    80
-## 10   don&#39;t have    71
-## # ... with 14,330 more rows</code></pre>
+##  1 social media   296
+##  2    not using   294
+##  3   don&#39;t need   183
+##  4      be back   172
+##  5    don&#39;t use   123
+##  6 awesome plan   115
+##  7    thank you    94
+##  8 using buffer    90
+##  9  love buffer    84
+## 10   don&#39;t have    78
+## # ... with 15,450 more rows</code></pre>
 <p>A bigram can also be treated as a term in a document in the same way that we treated individual words. For example, we can look at the tf-idf of these trigrams across the surveys. These tf-idf values can be visualized within each segment, just as we did for words earlier.</p>
 <p><img src="/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
 <p>I’m seeing a lot of people just not using or not needing Buffer.</p>
@@ -262,20 +262,20 @@ bigrams_united %&gt;%
 
 # Original counts
 bigram_counts</code></pre>
-<pre><code>## # A tibble: 14,340 x 3
+<pre><code>## # A tibble: 15,460 x 3
 ##      word1  word2     n
 ##      &lt;chr&gt;  &lt;chr&gt; &lt;int&gt;
-##  1     not  using   273
-##  2  social  media   270
-##  3   don&#39;t   need   169
-##  4      be   back   151
-##  5   don&#39;t    use   114
-##  6 awesome   plan   110
-##  7   thank    you    89
-##  8   using buffer    84
-##  9    love buffer    80
-## 10   don&#39;t   have    71
-## # ... with 14,330 more rows</code></pre>
+##  1  social  media   296
+##  2     not  using   294
+##  3   don&#39;t   need   183
+##  4      be   back   172
+##  5   don&#39;t    use   123
+##  6 awesome   plan   115
+##  7   thank    you    94
+##  8   using buffer    90
+##  9    love buffer    84
+## 10   don&#39;t   have    78
+## # ... with 15,450 more rows</code></pre>
 <p>Let’s create a bigram graph object.</p>
 <pre class="r"><code># filter for only relatively common combinations
 bigram_graph &lt;- bigram_counts %&gt;%
@@ -283,17 +283,17 @@ bigram_graph &lt;- bigram_counts %&gt;%
   graph_from_data_frame()
 
 bigram_graph</code></pre>
-<pre><code>## IGRAPH DN-- 46 41 -- 
+<pre><code>## IGRAPH DN-- 51 48 -- 
 ## + attr: name (v/c), n (e/n)
 ## + edges (vertex names):
-##  [1] not     -&gt;using     social  -&gt;media     don&#39;t   -&gt;need     
+##  [1] social  -&gt;media     not     -&gt;using     don&#39;t   -&gt;need     
 ##  [4] be      -&gt;back      don&#39;t   -&gt;use       awesome -&gt;plan     
 ##  [7] thank   -&gt;you       using   -&gt;buffer    love    -&gt;buffer   
 ## [10] don&#39;t   -&gt;have      too     -&gt;expensive buffer  -&gt;is       
-## [13] use     -&gt;buffer    you     -&gt;guys      come    -&gt;back     
-## [16] your    -&gt;service   this    -&gt;time      more    -&gt;than     
-## [19] is      -&gt;not       business-&gt;plan      is      -&gt;great    
-## [22] be      -&gt;able      it&#39;s    -&gt;not       this    -&gt;account  
+## [13] use     -&gt;buffer    come    -&gt;back      you     -&gt;guys     
+## [16] your    -&gt;service   more    -&gt;than      this    -&gt;time     
+## [19] is      -&gt;not       is      -&gt;great     be      -&gt;able     
+## [22] business-&gt;plan      this    -&gt;is        it&#39;s    -&gt;not      
 ## + ... omitted several edges</code></pre>
 <p>We can convert an igraph object into a ggraph with the ggraph function, after which we add layers to it, much like layers are added in ggplot2. For example, for a basic graph we need to add three layers: nodes, edges, and text.</p>
 <p><img src="/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
@@ -335,24 +335,24 @@ rowTotals &lt;- apply(dtm , 1, sum)
 dtm_new   &lt;- dtm[rowTotals &gt; 0, ]        
 
 inspect(dtm_new)</code></pre>
-<pre><code>## &lt;&lt;DocumentTermMatrix (documents: 18420, terms: 3370)&gt;&gt;
-## Non-/sparse entries: 18446/62056954
+<pre><code>## &lt;&lt;DocumentTermMatrix (documents: 20181, terms: 3573)&gt;&gt;
+## Non-/sparse entries: 20209/72086504
 ## Sparsity           : 100%
 ## Maximal term length: 21
 ## Weighting          : term frequency (tf)
 ## Sample             :
-##       Terms
-## Docs   account buffer business media plan post posts service social time
-##   1080       0      0        0     0    0    0     0       0      0    0
-##   1431       0      0        0     0    0    0     0       0      0    0
-##   1571       0      1        0     0    0    0     0       0      0    0
-##   257        0      0        0     0    0    0     0       0      0    0
-##   444        0      0        0     0    0    0     0       0      0    0
-##   521        0      0        0     0    0    0     0       0      0    0
-##   804        0      0        0     0    0    0     0       0      0    0
-##   848        0      0        0     0    0    0     0       0      0    0
-##   849        0      0        0     0    0    0     0       0      0    0
-##   868        0      0        0     0    0    0     0       0      0    0</code></pre>
+##        Terms
+## Docs    account buffer business media plan post posts service social time
+##   11593       0      0        0     0    0    0     0       0      0    0
+##   292         0      0        0     0    0    0     0       0      0    0
+##   457         0      0        0     0    0    0     0       0      0    0
+##   683         0      0        0     0    0    0     0       0      0    0
+##   747         0      0        0     0    0    0     0       0      0    0
+##   749         0      0        0     0    0    0     0       0      0    0
+##   774         0      0        0     0    0    0     0       0      0    0
+##   775         0      0        0     0    0    0     0       0      0    0
+##   874         0      0        0     0    0    0     0       0      0    0
+##   907         0      0        0     0    0    0     0       0      0    0</code></pre>
 <pre class="r"><code># Set a seed so that the output of the model is predictable
 lda &lt;- LDA(dtm_new, k = 2, control = list(seed = 1234))
 lda</code></pre>
@@ -366,20 +366,20 @@ lda</code></pre>
 </blockquote>
 <pre class="r"><code>topics &lt;- tidy(lda, matrix = &quot;beta&quot;)
 topics</code></pre>
-<pre><code>## # A tibble: 6,740 x 3
-##    topic      term         beta
-##    &lt;int&gt;     &lt;chr&gt;        &lt;dbl&gt;
-##  1     1  kwantlen 3.913575e-05
-##  2     2  kwantlen 6.928353e-05
-##  3     1     teach 3.717619e-05
-##  4     2     teach 7.124239e-05
-##  5     1   proving 4.910095e-05
-##  6     2   proving 5.932184e-05
-##  7     1   unclear 6.196103e-05
-##  8     2   unclear 4.646629e-05
-##  9     1 obnoxious 7.713323e-05
-## 10     2 obnoxious 3.129944e-05
-## # ... with 6,730 more rows</code></pre>
+<pre><code>## # A tibble: 7,146 x 3
+##    topic          term         beta
+##    &lt;int&gt;         &lt;chr&gt;        &lt;dbl&gt;
+##  1     1      kwantlen 4.033337e-05
+##  2     2      kwantlen 5.863022e-05
+##  3     1       sproutt 4.083158e-05
+##  4     2       sproutt 5.813212e-05
+##  5     1       proving 4.410840e-05
+##  6     2       proving 5.485610e-05
+##  7     1 unsubscribing 5.957771e-05
+##  8     2 unsubscribing 3.939055e-05
+##  9     1      sospecha 4.258361e-05
+## 10     2      sospecha 5.638052e-05
+## # ... with 7,136 more rows</code></pre>
 <p>This has turned the model into a one-topic-per-term-per-row format. For each combination, the model computes the probability of that term being generated from that topic.</p>
 <p>We could use <code>dplyr</code>’s <code>top_n()</code> to find the 10 terms that are most common within each topic.</p>
 <pre class="r"><code># Find top terms
