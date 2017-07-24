@@ -46,6 +46,10 @@ trials$activity_date <- as.Date(trials$activity_date, format = '%Y-%m-%d')
 trials <- trials %>%
   mutate(trial_length = as.numeric(end_date - start_date),
          trial_day = trial_day - 1)
+
+# Filter out trials that started in the last month
+trials <- trials %>%
+  filter(start_date < as.Date('2017-06-24'))
 ```
 
 Now that the data is clean, we want to calculate the latest date, after the trial began, that the user was active.

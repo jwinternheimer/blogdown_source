@@ -28,7 +28,11 @@ trials$activity_date &lt;- as.Date(trials$activity_date, format = &#39;%Y-%m-%d&
 # Calculate trial length
 trials &lt;- trials %&gt;%
   mutate(trial_length = as.numeric(end_date - start_date),
-         trial_day = trial_day - 1)</code></pre>
+         trial_day = trial_day - 1)
+
+# Filter out trials that started in the last month
+trials &lt;- trials %&gt;%
+  filter(start_date &lt; as.Date(&#39;2017-06-24&#39;))</code></pre>
 <p>Now that the data is clean, we want to calculate the latest date, after the trial began, that the user was active.</p>
 <pre class="r"><code># Group by user
 by_user &lt;- trials %&gt;%
