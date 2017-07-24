@@ -1,0 +1,277 @@
+---
+date: 2017-07-24T08:52:13-04:00
+subtitle: ""
+tags: []
+type: "post"
+title: Involuntary Churn
+---
+
+_Involuntary churn_ is a subset of churn in which the cancellation event was not directly initiated by the customer. For us, this occurs when there have been four consecutive failed payments. 
+
+The reasons for the failed payments are varied, but we can assume that there are customers whose intention was to continue subscribing to the service. In most cases, they could not because their credit card either expired or was declined for one reason or another.
+
+In this analysis we'll start small. We'll try to answer three simple questions about involuntary churn to gain a better understanding of where we stand:
+
+- What is the ratio (%) of involuntary churn to total churn ?
+- How much revenue is lost to involuntary churn?
+- We send 3 reminder emails after a failed payment - how many people open them? How many open them on a mobile device?
+
+## Data collection
+To answer the first question, we can query the `revenue_events` table, which records MRR-related events like _churn_, _upgrades_, _downgrades_, and the like. We can join in the `stripe._charges` table to check whether the charges associated with the last invoice were paid or failed.
+
+```{r include = FALSE}
+# Load libraries
+library(buffer); library(dplyr); library(ggplot2)
+
+# Get Redshift connection
+con <- redshift_connect()
+```
+
+```{sql connection=con, eval = FALSE}
+select 
+  e.created_at
+  , e.customer_id
+  , e.id
+  , e.subscription_id
+  , e.plan_id
+  , e.plan_interval
+  , e.mrr_type
+  , e.subscription_mrr_value
+  , e.type
+  , i.id as invoice
+  , (select c.id from stripe._charges c where c.invoice = i.id order by created desc limit 1) as charge_id
+  , (select c.captured from stripe._charges c where c.invoice = i.id order by created desc limit 1) as captured
+from revenue_events as e
+left join
+-- join events against the most recent invoice per subscription_id
+(
+select
+  i.subscription_id
+  , i.id 
+from stripe._invoices as i
+inner join (select subscription_id, max(date) as latest_date from stripe._invoices group by 1) recent
+  on i.subscription_id = recent.subscription_id
+where
+  i.date = recent.latest_date
+) i
+  on e.subscription_id = i.subscription_id
+left join stripe._charges as c
+  on c.invoice = i.id
+where mrr_type = 'churn'
+and created_at > (current_date - 730)
+```
+
+```{r include = FALSE}
+# Save churn events
+# save(events, file = "churn_events.Rda")
+
+load("churn_events.Rda")
+```
+
+Great, we now have around 160 thousand churn events from the past two years in a dataframe. The dataset includes the last invoice ID for that subscription, the last charge ID for that invoice, as well as whether or not the last charge for that invoice was captured. If the last charge for that subscription was not captured, we can assume that it failed, and that this churn event is an _involuntary_ one. 
+
+## Data tidying
+In order to answer the first question regarding the ratio of involuntary churn to total churn, we'll want to group the churn events by a certain time-frame. In this analysis I'll choose to group by month, but we could also do so by week. Let's extrace the month from the `created_at` column.
+
+```{r}
+# Extract month
+events <- events %>%
+  mutate(month = as.Date(paste0(format(created_at, "%Y-%m"), "-01")))
+
+# Remove NA values
+events <- events %>% filter(!(is.na(captured)))
+```
+
+Now let's group the data by month and calculate some summary statistics.
+
+```{r}
+# Group churn events by month
+by_month <- events %>%
+  group_by(month, plan_interval, captured) %>%
+  summarise(events = n_distinct(id),
+            customers = n_distinct(customer_id),
+            mrr = sum(subscription_mrr_value)) %>%
+  mutate(percent_of_events = events / sum(events),
+         percent_of_mrr = mrr / sum(mrr)) %>%
+  filter(month != '2015-07-01' & month != '2017-07-01')
+```
+
+We're now ready for some exploratory analysis.
+
+## Exploratory analysis
+What percentage of total churn is made up of _involuntary churn_?
+
+```{r echo = FALSE}
+events %>%
+  group_by(month, captured) %>%
+  summarise(events = n_distinct(id),
+            customers = n_distinct(customer_id),
+            mrr = sum(subscription_mrr_value)) %>%
+  mutate(percent_of_events = events / sum(events),
+         percent_of_mrr = mrr / sum(mrr)) %>%
+  filter(month != '2015-07-01' & month != '2017-07-01' & captured == FALSE) %>%
+  ggplot(aes(x = month, y = percent_of_events)) +
+  geom_point() +
+  geom_line() +
+  theme_minimal() +
+  labs(x = NULL, y = NULL, title = "Percent of Churn That is Involuntary")
+```
+
+Overall it looks like there is a clear, decreasing trend. Torwards the end of 2015, around 40% of churn events ended with a failed charge! That has decreased to around 31% now, which is still a high percentage. 
+
+Let's dig in a little deeper, and calculate the percent of total churn that is involuntary for each billing cycle.
+
+```{r echo = FALSE}
+events %>%
+  group_by(month, plan_interval, captured) %>%
+  summarise(events = n_distinct(id),
+            customers = n_distinct(customer_id),
+            mrr = sum(subscription_mrr_value)) %>%
+  mutate(percent_of_events = events / sum(events),
+         percent_of_mrr = mrr / sum(mrr)) %>%
+  filter(month != '2015-07-01' & month != '2017-07-01' & captured == FALSE) %>%
+  ggplot(aes(x = month, y = percent_of_events, color = plan_interval)) +
+  geom_point() +
+  geom_line() +
+  theme_minimal() +
+  labs(x = NULL, y = NULL, title = "Percent of Churn That is Involuntary", color = "Billing Cycle")
+```
+
+This graph makes it clear that involuntary churn is much higher for subscriptions that are billed annually. This makes sense intuitively, as there is a higher cost and a much longer time between payments. In February 2016, over 60% of churned subscriptions for annual plans ended with a failed payment! 
+
+How much MRR does this represent?
+
+```{r echo = FALSE}
+events %>%
+  group_by(month, captured) %>%
+  summarise(events = n_distinct(id),
+            customers = n_distinct(customer_id),
+            mrr = sum(subscription_mrr_value)) %>%
+  mutate(percent_of_events = events / sum(events),
+         percent_of_mrr = mrr / sum(mrr)) %>%
+  filter(month != '2015-07-01' & month != '2017-07-01' & captured == FALSE) %>%
+  ggplot(aes(x = month, y = mrr)) +
+  geom_bar(stat = 'identity') +
+  theme_minimal() +
+  labs(x = NULL, y = NULL, title = "MRR Lost to Involuntary Churn")
+```
+
+The MRR amount lost to involuntary churn is quite high. Around $70K is lost each month! This value is increasing, even though the percent of total churn that is involuntary is decreasing. This can occur when the value of each churn event increases, and the overall number of churn events also increases.
+
+### What effect to the reminder emails have? 
+This is harder to measure, but we can still do a bit of exploration with our dunning emails. We first need to gather the data, which we can do by querying the `user_email_actions` table.
+
+```{sql connection=con, eval = FALSE}
+select 
+	created_at
+	, email
+	, event_type
+	, user_id
+	, count(*)
+from user_email_actions
+where email like '%dunning%'
+and created_at >= (current_date - 365)
+group by 1, 2, 3, 4
+```
+
+```{r include = FALSE}
+# save(email_actions, file = "email_actions.Rda")
+
+load("email_actions.Rda")
+```
+
+We can quickly see how many of each email we've sent in the past year.
+
+```{r}
+table(email_actions$email)
+```
+
+Because it seems that there are different names for the same email, I'm going to rename them.
+
+```{r}
+# Replace emails_dunning_x names
+email_actions$email <- gsub("emails_dunning_phase_1_email", "dunning-phase-1", email_actions$email)
+email_actions$email <- gsub("emails_dunning_phase_2_email", "dunning-phase-2", email_actions$email)
+email_actions$email <- gsub("emails_dunning_phase_3_email", "dunning-phase-3", email_actions$email)
+email_actions$email <- gsub("emails_final_dunning_email", "dunning-final-email", email_actions$email)
+```
+
+Now let's count the emails again.
+
+```{r}
+table(email_actions$email)
+```
+
+It's good to see the numbers decrease. This suggests that users took action by either updating their payment method or canceling their subscription. Now let's look at the email actions for each email. To do this, let's group by month and count the number of users that took each type of action.
+
+```{r include = FALSE}
+# Extract month
+email_actions <- email_actions %>%
+  mutate(month = as.Date(paste0(format(created_at, "%Y-%m"), "-01")))
+```
+
+```{r}
+# Group by month
+actions_by_month <- email_actions %>%
+  group_by(month, email, event_type) %>%
+  summarise(users = n_distinct(user_id))
+```
+
+Now we need to _spread_ the data, so that each month, email, and event_type combination has a user count in it's own column. 
+
+```{r}
+library(tidyr)
+
+# Spread data
+wide_actions <- actions_by_month %>% 
+  spread(event_type, users)
+```
+
+For some reason, we only have the proper email counts from May 2017 onwards! Let's see if we can calculate open rates, after filtering out incomplete months.
+
+```{r}
+# Filter out incomplete months and calculate open rate
+wide_actions <- wide_actions %>%
+  filter(month >= '2017-05-01') %>%
+  mutate(open_rate = email_opens / emails,
+         ctr = email_clicks / emails)
+```
+
+Now let's plot the open rates for each month.
+
+```{r echo = FALSE}
+wide_actions %>%
+  filter(email != 'dunning-final-email') %>%
+  ggplot(aes(x = month, y = open_rate, color = email)) +
+  geom_point() + 
+  geom_line() +
+  facet_wrap(~ email, ncol = 3) +
+  guides(color = FALSE) +
+  labs(x = NULL, y = NULL, title = "Email Open Rates") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+What if we instead wanted to look at click through rates? We can define this as the proportion of users _that were sent the email_ that clicked through the CTA.
+
+```{r echo = FALSE}
+wide_actions %>%
+  filter(email != 'dunning-final-email') %>%
+  ggplot(aes(x = month, y = ctr, color = email)) +
+  geom_point() + 
+  geom_line() +
+  facet_wrap(~ email, ncol = 3) +
+  guides(color = FALSE) +
+  labs(x = NULL, y = NULL, title = "Email Click Thru Rates") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+These seem like fairly decent open rates, but low click-thru rates. Unfortunately, we don't track a `client_id` for these events, so I'm not sure how we can see how many of these emails were opened on a mobile device. We might need to use SendGrid or Mailchimp for that.
+
+## Conclusions
+The data suggests that involuntary churn makes up a significant portion of our overall churn, over 30%. This ratio has been decreasing substantially over the past two years. Subscriptions that are billed annually have much higher involuntary churn rates than those charged monthly. 
+
+Involuntary churn accounts for around 70-80 thousand dollars in MRR lost _each month_.
+
+Our dunning emails have relatively high open rates and decent click through rates, but we are unable to tell at the moment how many are opened on mobile devices. We are also unable to say, or estimate, the effects that the emails have on involuntary churn at this time. We may need to run a controlled experiment to make that estimate. :) 
+
+In the future, I would like to calculate involuntary churn rates segmented by country. A charge may be more likely to fail if the customer does not live in the United States. We may be able to mitigate some of this risk by asking for more information about the customer when we try to collect payments. 

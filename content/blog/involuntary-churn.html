@@ -1,0 +1,154 @@
+---
+date: 2017-07-24T08:52:13-04:00
+subtitle: ""
+tags: []
+type: "post"
+title: Involuntary Churn
+---
+
+
+
+<p><em>Involuntary churn</em> is a subset of churn in which the cancellation event was not directly initiated by the customer. For us, this occurs when there have been four consecutive failed payments.</p>
+<p>The reasons for the failed payments are varied, but we can assume that there are customers whose intention was to continue subscribing to the service. In most cases, they could not because their credit card either expired or was declined for one reason or another.</p>
+<p>In this analysis we’ll start small. We’ll try to answer three simple questions about involuntary churn to gain a better understanding of where we stand:</p>
+<ul>
+<li>What is the ratio (%) of involuntary churn to total churn ?</li>
+<li>How much revenue is lost to involuntary churn?</li>
+<li>We send 3 reminder emails after a failed payment - how many people open them? How many open them on a mobile device?</li>
+</ul>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>To answer the first question, we can query the <code>revenue_events</code> table, which records MRR-related events like <em>churn</em>, <em>upgrades</em>, <em>downgrades</em>, and the like. We can join in the <code>stripe._charges</code> table to check whether the charges associated with the last invoice were paid or failed.</p>
+<pre class="sql"><code>select 
+  e.created_at
+  , e.customer_id
+  , e.id
+  , e.subscription_id
+  , e.plan_id
+  , e.plan_interval
+  , e.mrr_type
+  , e.subscription_mrr_value
+  , e.type
+  , i.id as invoice
+  , (select c.id from stripe._charges c where c.invoice = i.id order by created desc limit 1) as charge_id
+  , (select c.captured from stripe._charges c where c.invoice = i.id order by created desc limit 1) as captured
+from revenue_events as e
+left join
+-- join events against the most recent invoice per subscription_id
+(
+select
+  i.subscription_id
+  , i.id 
+from stripe._invoices as i
+inner join (select subscription_id, max(date) as latest_date from stripe._invoices group by 1) recent
+  on i.subscription_id = recent.subscription_id
+where
+  i.date = recent.latest_date
+) i
+  on e.subscription_id = i.subscription_id
+left join stripe._charges as c
+  on c.invoice = i.id
+where mrr_type = &#39;churn&#39;
+and created_at &gt; (current_date - 730)</code></pre>
+<p>Great, we now have around 160 thousand churn events from the past two years in a dataframe. The dataset includes the last invoice ID for that subscription, the last charge ID for that invoice, as well as whether or not the last charge for that invoice was captured. If the last charge for that subscription was not captured, we can assume that it failed, and that this churn event is an <em>involuntary</em> one.</p>
+</div>
+<div id="data-tidying" class="section level2">
+<h2>Data tidying</h2>
+<p>In order to answer the first question regarding the ratio of involuntary churn to total churn, we’ll want to group the churn events by a certain time-frame. In this analysis I’ll choose to group by month, but we could also do so by week. Let’s extrace the month from the <code>created_at</code> column.</p>
+<pre class="r"><code># Extract month
+events &lt;- events %&gt;%
+  mutate(month = as.Date(paste0(format(created_at, &quot;%Y-%m&quot;), &quot;-01&quot;)))
+
+# Remove NA values
+events &lt;- events %&gt;% filter(!(is.na(captured)))</code></pre>
+<p>Now let’s group the data by month and calculate some summary statistics.</p>
+<pre class="r"><code># Group churn events by month
+by_month &lt;- events %&gt;%
+  group_by(month, plan_interval, captured) %&gt;%
+  summarise(events = n_distinct(id),
+            customers = n_distinct(customer_id),
+            mrr = sum(subscription_mrr_value)) %&gt;%
+  mutate(percent_of_events = events / sum(events),
+         percent_of_mrr = mrr / sum(mrr)) %&gt;%
+  filter(month != &#39;2015-07-01&#39; &amp; month != &#39;2017-07-01&#39;)</code></pre>
+<p>We’re now ready for some exploratory analysis.</p>
+</div>
+<div id="exploratory-analysis" class="section level2">
+<h2>Exploratory analysis</h2>
+<p>What percentage of total churn is made up of <em>involuntary churn</em>?</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>Overall it looks like there is a clear, decreasing trend. Torwards the end of 2015, around 40% of churn events ended with a failed charge! That has decreased to around 31% now, which is still a high percentage.</p>
+<p>Let’s dig in a little deeper, and calculate the percent of total churn that is involuntary for each billing cycle.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>This graph makes it clear that involuntary churn is much higher for subscriptions that are billed annually. This makes sense intuitively, as there is a higher cost and a much longer time between payments. In February 2016, over 60% of churned subscriptions for annual plans ended with a failed payment!</p>
+<p>How much MRR does this represent?</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>The MRR amount lost to involuntary churn is quite high. Around $70K is lost each month! This value is increasing, even though the percent of total churn that is involuntary is decreasing. This can occur when the value of each churn event increases, and the overall number of churn events also increases.</p>
+<div id="what-effect-to-the-reminder-emails-have" class="section level3">
+<h3>What effect to the reminder emails have?</h3>
+<p>This is harder to measure, but we can still do a bit of exploration with our dunning emails. We first need to gather the data, which we can do by querying the <code>user_email_actions</code> table.</p>
+<pre class="sql"><code>select 
+    created_at
+    , email
+    , event_type
+    , user_id
+    , count(*)
+from user_email_actions
+where email like &#39;%dunning%&#39;
+and created_at &gt;= (current_date - 365)
+group by 1, 2, 3, 4</code></pre>
+<p>We can quickly see how many of each email we’ve sent in the past year.</p>
+<pre class="r"><code>table(email_actions$email)</code></pre>
+<pre><code>## 
+##              dunning-phase-1              dunning-phase-2 
+##                        56507                        28313 
+##              dunning-phase-3 emails_dunning_phase_1_email 
+##                        24612                         4331 
+## emails_dunning_phase_2_email emails_dunning_phase_3_email 
+##                         3015                         1907 
+##   emails_final_dunning_email 
+##                          248</code></pre>
+<p>Because it seems that there are different names for the same email, I’m going to rename them.</p>
+<pre class="r"><code># Replace emails_dunning_x names
+email_actions$email &lt;- gsub(&quot;emails_dunning_phase_1_email&quot;, &quot;dunning-phase-1&quot;, email_actions$email)
+email_actions$email &lt;- gsub(&quot;emails_dunning_phase_2_email&quot;, &quot;dunning-phase-2&quot;, email_actions$email)
+email_actions$email &lt;- gsub(&quot;emails_dunning_phase_3_email&quot;, &quot;dunning-phase-3&quot;, email_actions$email)
+email_actions$email &lt;- gsub(&quot;emails_final_dunning_email&quot;, &quot;dunning-final-email&quot;, email_actions$email)</code></pre>
+<p>Now let’s count the emails again.</p>
+<pre class="r"><code>table(email_actions$email)</code></pre>
+<pre><code>## 
+## dunning-final-email     dunning-phase-1     dunning-phase-2 
+##                 248               60838               31328 
+##     dunning-phase-3 
+##               26519</code></pre>
+<p>It’s good to see the numbers decrease. This suggests that users took action by either updating their payment method or canceling their subscription. Now let’s look at the email actions for each email. To do this, let’s group by month and count the number of users that took each type of action.</p>
+<pre class="r"><code># Group by month
+actions_by_month &lt;- email_actions %&gt;%
+  group_by(month, email, event_type) %&gt;%
+  summarise(users = n_distinct(user_id))</code></pre>
+<p>Now we need to <em>spread</em> the data, so that each month, email, and event_type combination has a user count in it’s own column.</p>
+<pre class="r"><code>library(tidyr)
+
+# Spread data
+wide_actions &lt;- actions_by_month %&gt;% 
+  spread(event_type, users)</code></pre>
+<p>For some reason, we only have the proper email counts from May 2017 onwards! Let’s see if we can calculate open rates, after filtering out incomplete months.</p>
+<pre class="r"><code># Filter out incomplete months and calculate open rate
+wide_actions &lt;- wide_actions %&gt;%
+  filter(month &gt;= &#39;2017-05-01&#39;) %&gt;%
+  mutate(open_rate = email_opens / emails,
+         ctr = email_clicks / emails)</code></pre>
+<p>Now let’s plot the open rates for each month.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
+<p>What if we instead wanted to look at click through rates? We can define this as the proportion of users <em>that were sent the email</em> that clicked through the CTA.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
+<p>These seem like fairly decent open rates, but low click-thru rates. Unfortunately, we don’t track a <code>client_id</code> for these events, so I’m not sure how we can see how many of these emails were opened on a mobile device. We might need to use SendGrid or Mailchimp for that.</p>
+</div>
+</div>
+<div id="conclusions" class="section level2">
+<h2>Conclusions</h2>
+<p>The data suggests that involuntary churn makes up a significant portion of our overall churn, over 30%. This ratio has been decreasing substantially over the past two years. Subscriptions that are billed annually have much higher involuntary churn rates than those charged monthly.</p>
+<p>Involuntary churn accounts for around 70-80 thousand dollars in MRR lost <em>each month</em>.</p>
+<p>Our dunning emails have relatively high open rates and decent click through rates, but we are unable to tell at the moment how many are opened on mobile devices. We are also unable to say, or estimate, the effects that the emails have on involuntary churn at this time. We may need to run a controlled experiment to make that estimate. :)</p>
+<p>In the future, I would like to calculate involuntary churn rates segmented by country. A charge may be more likely to fail if the customer does not live in the United States. We may be able to mitigate some of this risk by asking for more information about the customer when we try to collect payments.</p>
+</div>
