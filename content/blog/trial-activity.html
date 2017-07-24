@@ -1,0 +1,49 @@
+---
+date: 2017-07-24T14:10:33-04:00
+subtitle: ""
+tags: []
+type: "post"
+title: How active are Business trialists?
+---
+
+
+
+<p>One question that has come up recently is about Business trialists: how long do they stick with the trial before becoming inactive and churning from Buffer?</p>
+<p>To answer this question, we can analyze the data in <a href="https://looker.buffer.com/looks/3975"><strong>this Look</strong></a>. The dataset contains the trial start and end dates for each user, as well as the days in which there were any <code>actions_taken</code> events triggered.</p>
+<p>The number of actions for each day is counted for up to 30 days after the trial start date for each user. In our analysis, we can count how many users have a maximum action date 1, 2, 7, etc. days after their trial began to estimate the percentage of trialists that become inactive on each day of the trial.</p>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>We can use the <code>get_look()</code> function from the <code>buffer</code> package to collect data from the Look mentioned above.</p>
+<pre class="r"><code># Get data from look
+trials &lt;- get_look(3975)</code></pre>
+<p>Let’s tidy up the data quick.</p>
+<pre class="r"><code># Rename columns
+colnames(trials) &lt;- c(&#39;start_date&#39;, &#39;end_date&#39;, &#39;user_id&#39;, &#39;activity_date&#39;, &#39;trial_day&#39;, &#39;actions&#39;)
+
+# Set dates as date objects
+trials$start_date &lt;- as.Date(trials$start_date, format = &#39;%Y-%m-%d&#39;)
+trials$end_date &lt;- as.Date(trials$end_date, format = &#39;%Y-%m-%d&#39;)
+trials$activity_date &lt;- as.Date(trials$activity_date, format = &#39;%Y-%m-%d&#39;)
+
+# Calculate trial length
+trials &lt;- trials %&gt;%
+  mutate(trial_length = as.numeric(end_date - start_date),
+         trial_day = trial_day - 1)</code></pre>
+<p>Now that the data is clean, we want to calculate the latest date, after the trial began, that the user was active.</p>
+<pre class="r"><code># Group by user
+by_user &lt;- trials %&gt;%
+  group_by(user_id, start_date, end_date, trial_length) %&gt;%
+  summarise(last_active = max(activity_date), 
+            last_trial_day_activity = max(trial_day))</code></pre>
+<p>Cool. Now we’re ready to explore a bit.</p>
+</div>
+<div id="exploratory-analysis" class="section level2">
+<h2>Exploratory analysis</h2>
+<p>Let’s see how many users were last active on each day. To begin, let’s filter our data so that only <em>14-day</em> trials are included.</p>
+<p><img src="/blog/trial-activity_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>As we can see, the biggest dropoff <em>by far</em> comes after the first day. We’ve seen in the past that many users start trials shortly after signing up for Buffer, so this might be something that we’d expect to see. Let’s see if we can calculate the percentage of users that are still active after each day of the trial.</p>
+<p><img src="/blog/trial-activity_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>This plot shows the percentage of trialists that are still active <em>after</em> each trial day. We can see that the biggest drop comes from the first day – only 63% of Business trialists from the past year were active after day 0.</p>
+<p>After the first day, there percentage of users remaining decreases linearly, with around the same percentage dropping out each day.</p>
+<p>In the future, we can segment these retention curves by user attributes, like the type of trial, trial length, or weekday that the trial started. For now, we’ll leave it here. :)</p>
+</div>
