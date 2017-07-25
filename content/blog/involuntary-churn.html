@@ -19,49 +19,64 @@ title: Involuntary Churn
 <div id="data-collection" class="section level2">
 <h2>Data collection</h2>
 <p>To answer the first question, we can query the <code>revenue_events</code> table, which records MRR-related events like <em>churn</em>, <em>upgrades</em>, <em>downgrades</em>, and the like. We can join in the <code>stripe._charges</code> table to check whether the charges associated with the last invoice were paid or failed.</p>
-<pre class="sql"><code>select 
-  e.created_at
-  , e.customer_id
-  , e.id
-  , e.subscription_id
-  , e.plan_id
-  , e.plan_interval
-  , e.mrr_type
-  , e.subscription_mrr_value
-  , e.type
-  , i.id as invoice
-  , (select c.id from stripe._charges c where c.invoice = i.id order by created desc limit 1) as charge_id
-  , (select c.captured from stripe._charges c where c.invoice = i.id order by created desc limit 1) as captured
-from revenue_events as e
-left join
--- join events against the most recent invoice per subscription_id
-(
-select
-  i.subscription_id
-  , i.id 
-from stripe._invoices as i
-inner join (select subscription_id, max(date) as latest_date from stripe._invoices group by 1) recent
-  on i.subscription_id = recent.subscription_id
-where
-  i.date = recent.latest_date
-) i
-  on e.subscription_id = i.subscription_id
-left join stripe._charges as c
-  on c.invoice = i.id
-where mrr_type = &#39;churn&#39;
-and created_at &gt; (current_date - 730)</code></pre>
-<p>Great, we now have around 160 thousand churn events from the past two years in a dataframe. The dataset includes the last invoice ID for that subscription, the last charge ID for that invoice, as well as whether or not the last charge for that invoice was captured. If the last charge for that subscription was not captured, we can assume that it failed, and that this churn event is an <em>involuntary</em> one.</p>
+<pre class="sql"><code>with last_invoice as (
+    select
+    i.subscription_id
+    , i.id as invoice_id
+    from stripe._invoices as i
+    inner join (select subscription_id, max(date) as latest_date from stripe._invoices group by 1) recent
+    on i.subscription_id = recent.subscription_id
+    where
+    i.date = recent.latest_date
+    ),
+    last_charge as (
+        select 
+            c.invoice as invoice_id
+            , c.id as charge_id
+            , c.captured
+        from stripe._charges as c
+        inner join (select invoice, max(created) as latest_charge from stripe._charges group by 1) recent_charges
+            on c.invoice = recent_charges.invoice
+        where c.created = recent_charges.latest_charge
+    ),
+    last_invoice_and_charge as(
+        select
+            last_invoice.subscription_id
+            , last_invoice.invoice_id
+            , last_charge.charge_id
+            , last_charge.captured
+        from last_invoice
+        left join last_charge
+            on last_invoice.invoice_id = last_charge.invoice_id
+    )
+    select 
+    e.created_at
+    , e.customer_id
+    , e.id
+    , e.subscription_id
+    , e.plan_id
+    , e.plan_interval
+    , e.mrr_type
+    , e.subscription_mrr_value
+    , e.type
+        , c.invoice_id
+        , c.charge_id
+        , c.captured
+    from revenue_events as e
+    left join last_invoice_and_charge as c
+        on e.subscription_id = c.subscription_id
+    where e.mrr_type = &#39;churn&#39; 
+    and e.created_at &gt; (current_date - 730)</code></pre>
+<p>Great, we now have around 80 thousand churn events from the past two years in a dataframe. The dataset includes the last invoice ID for that subscription, the last charge ID for that invoice, as well as whether or not the last charge for that invoice was captured. If the last charge for that subscription was not captured, we can assume that it failed, and that this churn event is an <em>involuntary</em> one.</p>
 </div>
 <div id="data-tidying" class="section level2">
 <h2>Data tidying</h2>
 <p>In order to answer the first question regarding the ratio of involuntary churn to total churn, we’ll want to group the churn events by a certain time-frame. In this analysis I’ll choose to group by month, but we could also do so by week. Let’s extrace the month from the <code>created_at</code> column.</p>
 <pre class="r"><code># Extract month
 events &lt;- events %&gt;%
-  mutate(month = as.Date(paste0(format(created_at, &quot;%Y-%m&quot;), &quot;-01&quot;)))
-
-# Remove NA values
-events &lt;- events %&gt;% filter(!(is.na(captured)))</code></pre>
-<p>Now let’s group the data by month and calculate some summary statistics.</p>
+  mutate(month = as.Date(paste0(format(created_at, &quot;%Y-%m&quot;), &quot;-01&quot;)))</code></pre>
+<p>There are values with NAs in this dataset. If we take a closer look at these subscriptions and invoices, we’ll notice that the subscriptions do not have any charges associated with them in the <code>stripe._charges</code> table! That seems odd - something to look into in the future.</p>
+<p>For now, let’s group the churn data by month and calculate some summary statistics. We’ll calculate the number of churn events, the number of customers lost, and the MRR amount lost to churn.</p>
 <pre class="r"><code># Group churn events by month
 by_month &lt;- events %&gt;%
   group_by(month, plan_interval, captured) %&gt;%
@@ -75,15 +90,24 @@ by_month &lt;- events %&gt;%
 </div>
 <div id="exploratory-analysis" class="section level2">
 <h2>Exploratory analysis</h2>
-<p>What percentage of total churn is made up of <em>involuntary churn</em>?</p>
+<p>What percentage of all churn events is made up of <em>involuntary churn</em>?</p>
 <p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
-<p>Overall it looks like there is a clear, decreasing trend. Torwards the end of 2015, around 40% of churn events ended with a failed charge! That has decreased to around 31% now, which is still a high percentage.</p>
-<p>Let’s dig in a little deeper, and calculate the percent of total churn that is involuntary for each billing cycle.</p>
-<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>Overall it looks like there is a clear, decreasing trend. Torwards the end of 2015, around 40% of churn events ended with a failed charge! That has decreased to around 30% now, which is still a high percentage. Let’s take a closer look at June 2017.</p>
+<pre><code>## # A tibble: 3 x 7
+## # Groups:   month [1]
+##        month captured events customers       mrr percent_of_events
+##       &lt;date&gt;    &lt;lgl&gt;  &lt;int&gt;     &lt;int&gt;     &lt;dbl&gt;             &lt;dbl&gt;
+## 1 2017-06-01    FALSE   1050      1036 19382.833        0.29812606
+## 2 2017-06-01     TRUE   2326      2315 38838.333        0.66042022
+## 3 2017-06-01       NA    146        21  4368.667        0.04145372
+## # ... with 1 more variables: percent_of_mrr &lt;dbl&gt;</code></pre>
+<p>In June, there were 3522 churn events that accounted for $62K in lost MRR. Of those 3522 churn events, Around 30% came from subscriptions whose latest invoice was not paid.</p>
+<p>Let’s dig in a little deeper into this data, and calculate the percent of total churn that is involuntary for subscriptions that are billed monthly and subscriptions that are billed annually.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
 <p>This graph makes it clear that involuntary churn is much higher for subscriptions that are billed annually. This makes sense intuitively, as there is a higher cost and a much longer time between payments. In February 2016, over 60% of churned subscriptions for annual plans ended with a failed payment!</p>
 <p>How much MRR does this represent?</p>
-<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
-<p>The MRR amount lost to involuntary churn is quite high. Around $70K is lost each month! This value is increasing, even though the percent of total churn that is involuntary is decreasing. This can occur when the value of each churn event increases, and the overall number of churn events also increases.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>The MRR amount lost to involuntary churn is quite high. Around 15 to 20K is lost each month! This value is increasing, even though the percent of total churn that is involuntary is decreasing. This can occur when the value of each churn event increases, and the overall number of churn events also increases.</p>
 <div id="what-effect-to-the-reminder-emails-have" class="section level3">
 <h3>What effect to the reminder emails have?</h3>
 <p>This is harder to measure, but we can still do a bit of exploration with our dunning emails. We first need to gather the data, which we can do by querying the <code>user_email_actions</code> table.</p>
@@ -139,16 +163,16 @@ wide_actions &lt;- wide_actions %&gt;%
   mutate(open_rate = email_opens / emails,
          ctr = email_clicks / emails)</code></pre>
 <p>Now let’s plot the open rates for each month.</p>
-<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
-<p>What if we instead wanted to look at click through rates? We can define this as the proportion of users <em>that were sent the email</em> that clicked through the CTA.</p>
 <p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
+<p>What if we instead wanted to look at click through rates? We can define this as the proportion of users <em>that were sent the email</em> that clicked through the CTA.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-20-1.png" width="672" /></p>
 <p>These seem like fairly decent open rates, but low click-thru rates. Unfortunately, we don’t track a <code>client_id</code> for these events, so I’m not sure how we can see how many of these emails were opened on a mobile device. We might need to use SendGrid or Mailchimp for that.</p>
 </div>
 </div>
 <div id="conclusions" class="section level2">
 <h2>Conclusions</h2>
 <p>The data suggests that involuntary churn makes up a significant portion of our overall churn, over 30%. This ratio has been decreasing substantially over the past two years. Subscriptions that are billed annually have much higher involuntary churn rates than those charged monthly.</p>
-<p>Involuntary churn accounts for around 70-80 thousand dollars in MRR lost <em>each month</em>.</p>
+<p>Involuntary churn accounts for around 15-20 thousand dollars in MRR lost <em>each month</em>.</p>
 <p>Our dunning emails have relatively high open rates and decent click through rates, but we are unable to tell at the moment how many are opened on mobile devices. We are also unable to say, or estimate, the effects that the emails have on involuntary churn at this time. We may need to run a controlled experiment to make that estimate. :)</p>
 <p>In the future, I would like to calculate involuntary churn rates segmented by country. A charge may be more likely to fail if the customer does not live in the United States. We may be able to mitigate some of this risk by asking for more information about the customer when we try to collect payments.</p>
 </div>

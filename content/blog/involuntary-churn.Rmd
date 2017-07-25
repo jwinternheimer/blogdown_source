@@ -28,37 +28,54 @@ con <- redshift_connect()
 ```
 
 ```{sql connection=con, eval = FALSE}
-select 
-  e.created_at
-  , e.customer_id
-  , e.id
-  , e.subscription_id
-  , e.plan_id
-  , e.plan_interval
-  , e.mrr_type
-  , e.subscription_mrr_value
-  , e.type
-  , i.id as invoice
-  , (select c.id from stripe._charges c where c.invoice = i.id order by created desc limit 1) as charge_id
-  , (select c.captured from stripe._charges c where c.invoice = i.id order by created desc limit 1) as captured
-from revenue_events as e
-left join
--- join events against the most recent invoice per subscription_id
-(
-select
-  i.subscription_id
-  , i.id 
-from stripe._invoices as i
-inner join (select subscription_id, max(date) as latest_date from stripe._invoices group by 1) recent
-  on i.subscription_id = recent.subscription_id
-where
-  i.date = recent.latest_date
-) i
-  on e.subscription_id = i.subscription_id
-left join stripe._charges as c
-  on c.invoice = i.id
-where mrr_type = 'churn'
-and created_at > (current_date - 730)
+with last_invoice as (
+	select
+  	i.subscription_id
+  	, i.id as invoice_id
+	from stripe._invoices as i
+	inner join (select subscription_id, max(date) as latest_date from stripe._invoices group by 1) recent
+  	on i.subscription_id = recent.subscription_id
+	where
+  	i.date = recent.latest_date
+	),
+	last_charge as (
+		select 
+			c.invoice as invoice_id
+			, c.id as charge_id
+			, c.captured
+		from stripe._charges as c
+		inner join (select invoice, max(created) as latest_charge from stripe._charges group by 1) recent_charges
+			on c.invoice = recent_charges.invoice
+		where c.created = recent_charges.latest_charge
+	),
+	last_invoice_and_charge as(
+		select
+			last_invoice.subscription_id
+			, last_invoice.invoice_id
+			, last_charge.charge_id
+			, last_charge.captured
+		from last_invoice
+		left join last_charge
+			on last_invoice.invoice_id = last_charge.invoice_id
+	)
+	select 
+  	e.created_at
+  	, e.customer_id
+  	, e.id
+  	, e.subscription_id
+  	, e.plan_id
+  	, e.plan_interval
+  	, e.mrr_type
+  	, e.subscription_mrr_value
+  	, e.type
+		, c.invoice_id
+		, c.charge_id
+		, c.captured
+	from revenue_events as e
+	left join last_invoice_and_charge as c
+		on e.subscription_id = c.subscription_id
+	where e.mrr_type = 'churn' 
+	and e.created_at > (current_date - 730)
 ```
 
 ```{r include = FALSE}
@@ -68,7 +85,7 @@ and created_at > (current_date - 730)
 load("churn_events.Rda")
 ```
 
-Great, we now have around 160 thousand churn events from the past two years in a dataframe. The dataset includes the last invoice ID for that subscription, the last charge ID for that invoice, as well as whether or not the last charge for that invoice was captured. If the last charge for that subscription was not captured, we can assume that it failed, and that this churn event is an _involuntary_ one. 
+Great, we now have around 80 thousand churn events from the past two years in a dataframe. The dataset includes the last invoice ID for that subscription, the last charge ID for that invoice, as well as whether or not the last charge for that invoice was captured. If the last charge for that subscription was not captured, we can assume that it failed, and that this churn event is an _involuntary_ one. 
 
 ## Data tidying
 In order to answer the first question regarding the ratio of involuntary churn to total churn, we'll want to group the churn events by a certain time-frame. In this analysis I'll choose to group by month, but we could also do so by week. Let's extrace the month from the `created_at` column.
@@ -77,12 +94,11 @@ In order to answer the first question regarding the ratio of involuntary churn t
 # Extract month
 events <- events %>%
   mutate(month = as.Date(paste0(format(created_at, "%Y-%m"), "-01")))
-
-# Remove NA values
-events <- events %>% filter(!(is.na(captured)))
 ```
 
-Now let's group the data by month and calculate some summary statistics.
+There are values with NAs in this dataset. If we take a closer look at these subscriptions and invoices, we'll notice that the subscriptions do not have any charges associated with them in the `stripe._charges` table! That seems odd - something to look into in the future.
+
+For now, let's group the churn data by month and calculate some summary statistics. We'll calculate the number of churn events, the number of customers lost, and the MRR amount lost to churn.
 
 ```{r}
 # Group churn events by month
@@ -99,7 +115,7 @@ by_month <- events %>%
 We're now ready for some exploratory analysis.
 
 ## Exploratory analysis
-What percentage of total churn is made up of _involuntary churn_?
+What percentage of all churn events is made up of _involuntary churn_?
 
 ```{r echo = FALSE}
 events %>%
@@ -117,9 +133,23 @@ events %>%
   labs(x = NULL, y = NULL, title = "Percent of Churn That is Involuntary")
 ```
 
-Overall it looks like there is a clear, decreasing trend. Torwards the end of 2015, around 40% of churn events ended with a failed charge! That has decreased to around 31% now, which is still a high percentage. 
+Overall it looks like there is a clear, decreasing trend. Torwards the end of 2015, around 40% of churn events ended with a failed charge! That has decreased to around 30% now, which is still a high percentage. Let's take a closer look at June 2017.
 
-Let's dig in a little deeper, and calculate the percent of total churn that is involuntary for each billing cycle.
+```{r echo = FALSE}
+# June 2017
+events %>%
+  filter(month == '2017-06-01') %>%
+  group_by(month, captured) %>%
+  summarise(events = n_distinct(id),
+            customers = n_distinct(customer_id),
+            mrr = sum(subscription_mrr_value)) %>%
+  mutate(percent_of_events = events / sum(events),
+         percent_of_mrr = mrr / sum(mrr))
+```
+
+In June, there were 3522 churn events that accounted for $62K in lost MRR. Of those 3522 churn events, Around 30% came from subscriptions whose latest invoice was not paid. 
+
+Let's dig in a little deeper into this data, and calculate the percent of total churn that is involuntary for subscriptions that are billed monthly and subscriptions that are billed annually.
 
 ```{r echo = FALSE}
 events %>%
@@ -156,7 +186,7 @@ events %>%
   labs(x = NULL, y = NULL, title = "MRR Lost to Involuntary Churn")
 ```
 
-The MRR amount lost to involuntary churn is quite high. Around $70K is lost each month! This value is increasing, even though the percent of total churn that is involuntary is decreasing. This can occur when the value of each churn event increases, and the overall number of churn events also increases.
+The MRR amount lost to involuntary churn is quite high. Around 15 to 20K is lost each month! This value is increasing, even though the percent of total churn that is involuntary is decreasing. This can occur when the value of each churn event increases, and the overall number of churn events also increases.
 
 ### What effect to the reminder emails have? 
 This is harder to measure, but we can still do a bit of exploration with our dunning emails. We first need to gather the data, which we can do by querying the `user_email_actions` table.
@@ -270,7 +300,7 @@ These seem like fairly decent open rates, but low click-thru rates. Unfortunatel
 ## Conclusions
 The data suggests that involuntary churn makes up a significant portion of our overall churn, over 30%. This ratio has been decreasing substantially over the past two years. Subscriptions that are billed annually have much higher involuntary churn rates than those charged monthly. 
 
-Involuntary churn accounts for around 70-80 thousand dollars in MRR lost _each month_.
+Involuntary churn accounts for around 15-20 thousand dollars in MRR lost _each month_.
 
 Our dunning emails have relatively high open rates and decent click through rates, but we are unable to tell at the moment how many are opened on mobile devices. We are also unable to say, or estimate, the effects that the emails have on involuntary churn at this time. We may need to run a controlled experiment to make that estimate. :) 
 
