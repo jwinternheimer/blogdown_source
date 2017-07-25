@@ -1,0 +1,111 @@
+---
+date: 2017-07-25T16:16:33-04:00
+subtitle: ""
+tags: []
+type: "post"
+title: When do customers churn?
+---
+
+
+
+<p>How long do customers stick with Buffer? Are there any covariates that affect the amount of time a user is expected to stay on a paid subscription?</p>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>We can run the following query in Stripe Sigma to gather data on all Stripe subscriptions that have had successful charges.</p>
+<pre class="sql"><code>select 
+    subscriptions.id
+  , subscriptions.created
+  , subscriptions.canceled_at
+  , subscriptions.plan_id
+  , plans.interval
+  , subscriptions.customer_id
+  , count(distinct charges.id) as successful_charges
+from subscriptions
+left join invoices
+    on invoices.subscription_id = subscriptions.id
+left join charges
+    on charges.invoice_id = invoices.id
+left join plans
+    on plans.id = subscriptions.plan_id
+where charges.paid = TRUE
+group by 1, 2, 3, 4, 5, 6</code></pre>
+<p>I exported this data to a CSV, which we’ll read into R now.</p>
+<pre class="r"><code># Read CSV
+subs &lt;- read.csv(&quot;~/Downloads/subscriptions.csv&quot;, header = T)</code></pre>
+<p>There are over 185 thousand subscriptions in this dataset. We include the subscription ID, when it was created, the cancellation date (if it was cancelled), the plan ID, the billing interval, the customer ID, and the number of successful charges.</p>
+<p>Let’s calculate a new variable, the length of the subscription in days. We also need to create an indicator variable to let us know if the subscription has churned.</p>
+<pre class="r"><code># Calculate subscription length and churn indicator
+subs &lt;- subs %&gt;%
+  mutate(length = as.numeric(canceled_at - created),
+         did_churn = ifelse(is.na(canceled_at), 0, 1))</code></pre>
+</div>
+<div id="survival-analysis" class="section level2">
+<h2>Survival analysis</h2>
+<p>To get a better understanding of exactly when customers churn, we’ll use a technique called <em>survival analysis</em>. Clasically, survival analysis was used to model the time it takes for people to die of a disease. However it can be used to model and analyze the time it takes for a specific event to occur, churn in this case.</p>
+<p>It is particularly useful because of missing data – there must be subscriptions that will churn in our dataset <em>that haven’t done so yet</em>. This is called <em>censoring</em>, and in particular <em>right censoring</em>.</p>
+<p>Right censoring occurs when the date of the event is unknown, but is after some known date. Survival analysis can account for this kind of censoring.</p>
+<p>There is also left censoring, for example when the date the subscription was created is unknown, but that is less applicable to our case.</p>
+<p>The survival function, or survival curve, (<code>S</code>) models the probability that the time of the event (<code>T</code>) is greater than some specified time (<code>t</code>).</p>
+<p>Let’s build the survival curve and plot it out.</p>
+<pre class="r"><code># Kaplan Meier survival curve
+subs$survival &lt;- Surv(subs$length, subs$did_churn)
+
+# Fit the model
+fit &lt;- survfit(survival ~ 1, data = subs)
+
+# Create survival plot
+ggsurvplot(fit, data = subs, risk.table = &quot;percentage&quot;, 
+           risk.table.title = &quot;Percent Remaining&quot;,
+           break.x.by = 60, xlim = c(0, 720))</code></pre>
+<p><img src="/blog/when-do-customers-churn_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>The plot shows the percent of subscriptions still active X days after creating the subscription. The risk table below the graph shows the percent of subscription still remaining after X days. We can see that there are kinks around every 30 days, as well as a large kink at 365 days, when many annual subscriptions are cancelled.</p>
+<p>It is important to note that the curve is steeper earlier on, suggesting that larger percentages of subscriptions churn early on in their lifetimes. It might be useful to break this graph up to visualize the survival curves for both monthly and annual subscriptions.</p>
+<pre class="r"><code># Fit the second model
+fit2 &lt;- survfit(survival ~ interval, data = subs)
+
+# Create survival plot
+ggsurvplot(fit2, data = subs, risk.table = &quot;percentage&quot;, 
+           risk.table.height = 0.30, surv.plot.height = 0.70,
+           risk.table.y.text = FALSE, tables.y.text = FALSE,
+           risk.table.title = &quot;Percent Remaining&quot;,
+           break.x.by = 60, xlim = c(0, 720))</code></pre>
+<p><img src="/blog/when-do-customers-churn_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>In the graph above, the survival curves have been segmented by the billing interval. By day 60, around 73% of monthly subscriptions were still active, compared to around 91% of annual subscriptions.</p>
+<p>Annual subscriptions have a very low rate of churn, up until the 365 day mark, after which time almost 70% of annual subscriptions are churned!</p>
+</div>
+<div id="v2-business-subscriptions" class="section level2">
+<h2>V2 Business Subscriptions</h2>
+<p>Let’s get a little more granular, and look only at v2 Buffer for Business subscriptions.</p>
+<pre class="r"><code># Drop survival object
+subs$survival &lt;- NULL
+
+# Identify v2 business plans
+biz_plans &lt;- c(&#39;business_v2_agency_monthly&#39;, &#39;business_v2_agency_yearly&#39;, &#39;business_v2_business_monthly&#39;,
+               &#39;business_v2_business_yearly&#39;, &#39;business_v2_small_monthly&#39;, &#39;business_v2_small_yearly&#39;)
+
+# Get business subscriptions
+biz_subs &lt;- subs %&gt;%
+  filter(plan_id %in% biz_plans)</code></pre>
+<p>Now let’s take the same approach as before, and visualize the survival curves of the annual and monthly plans.</p>
+<pre class="r"><code># Kaplan Meier survival object
+biz_subs$survival &lt;- Surv(biz_subs$length, biz_subs$did_churn)
+
+# Fit the third model
+fit3 &lt;- survfit(survival ~ interval, data = biz_subs)
+
+# Create survival plot
+ggsurvplot(fit3, data = biz_subs, risk.table = &quot;percentage&quot;, 
+           risk.table.height = 0.30, surv.plot.height = 0.70,
+           risk.table.y.text = FALSE, tables.y.text = FALSE,
+           risk.table.title = &quot;Percent Remaining&quot;,
+           break.x.by = 30, xlim = c(0, 420))</code></pre>
+<p><img src="/blog/when-do-customers-churn_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>Based on the risk table, we can gather that approximately 16% of V2 Business subscriptions churn in the first 30 days.</p>
+<ul>
+<li>By day 60, only 65% of monthly subscriptions and 77% of annual subscriptions remain.</li>
+<li>By day 90, almost half of monthly subscriptions and around 30% of annual subscriptions have churned.</li>
+<li>By day 180, around 70% of monthly subscriptions and 40% of annual subscriptions have churned.</li>
+<li>By day 365, around 90% of monthly subscriptions and 80% of annual subscriptions have churned.</li>
+</ul>
+<p>This paints a fairly worrying picture of churn for the V2 Business subscriptions. It is good to know that efforts are being made to reduce churn and make sure people get on the best plan for their needs. :)</p>
+</div>
