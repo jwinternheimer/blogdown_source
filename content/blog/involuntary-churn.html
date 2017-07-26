@@ -108,6 +108,47 @@ by_month &lt;- events %&gt;%
 <p>How much MRR does this represent?</p>
 <p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
 <p>The MRR amount lost to involuntary churn is quite high. Around 15 to 20K is lost each month! This value is increasing, even though the percent of total churn that is involuntary is decreasing. This can occur when the value of each churn event increases, and the overall number of churn events also increases.</p>
+</div>
+<div id="payment-information" class="section level2">
+<h2>Payment information</h2>
+<p>Payments fail for different reasons, some of which we can control. We may be able to assume that charges are less likely to fail if we have more information about the customer, e.g. his or her address.</p>
+<p>Let’s check this assumption by looking at our charges in the past, and see how many of them had infomation like addresses and zip codes. We can get this data by querying the tables in Stripe’s Sigma tool. We’ll use the following query to gather the number of charges, successful or failed, each month, as well as whether or not the cards had addresses and zip codes. We’ll also be able to segment by the card type.</p>
+<pre class="sql"><code>with charge_information as (
+  select
+    date_trunc(&#39;month&#39;, charges.created) as month, 
+    charges.card_brand,
+    charges.id as charge_id,
+    charges.captured,
+    trim(charges.card_address_zip) as card_address_zip,
+    trim(charges.card_address_line1) as card_address_line1
+  from charges
+  left join balance_transactions
+    on charges.id = balance_transactions.source_id
+)
+
+select
+  date_format(month, &#39;%Y-%m&#39;) as month,
+  coalesce(card_brand, &#39;Non-card or Other&#39;) as card,
+  captured,
+  length(card_address_zip) &gt; 0 as has_zip,
+  length(card_address_line1) &gt; 0 as has_address,
+  count(distinct charge_id) as charges
+from charge_information
+group by 1, 2, 3, 4, 5
+order by 1 desc</code></pre>
+<p>To begin, let’s start by just visualizing the percentage of charges that were captured over time.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>We can see that where was a decreasing trend from Buffer’s inception to the middle of 2014 - a decreasing percentage of charges were successfully paid. However, beginning around March 2016, the percentage of charges captured has been trending upward. We started collecting customers’ zip codes around March 2016, which may suggest that collecting zip codes decreased the rate of involuntary churn.</p>
+<p>Let’s segment this data by whether or not we had the customer’s zip code at the time of the charge. We’ll filter to only graph data after March of 2016</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>Wow, we can see clearly that charges in which we have users’ zip codes fail less often than charges in which we don’t. We can also segment the data by whether or not we collected the customers’ addresses, however it doesn’t quite seem like we’ve collected customers’ addresses.</p>
+<p>Let’s see if the type of credit card makes any difference.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
+<p>Certain types of credit cards clearly outperform others in terms of charges captured. AMEX cards have a significantly higher capture rate than Visa or Mastercard. Discover, Diners Club, and JBC all don’t seem to have large enough sample sizes to tell for sure.</p>
+<p>Let’s plot the capture rate for each of these cards, and segment each by whether or not we had a zip code.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
+<p>For each type of card, having the zip code improves the capture rate. Awesome! These graphs suggest that having more information decreases the likelihood of a failed payment.</p>
+<p>Therefore I might suggest an experiment in which we also ask for users’ addresses, if they are in the US.</p>
 <div id="what-effect-to-the-reminder-emails-have" class="section level3">
 <h3>What effect to the reminder emails have?</h3>
 <p>This is harder to measure, but we can still do a bit of exploration with our dunning emails. We first need to gather the data, which we can do by querying the <code>user_email_actions</code> table.</p>
@@ -163,9 +204,9 @@ wide_actions &lt;- wide_actions %&gt;%
   mutate(open_rate = email_opens / emails,
          ctr = email_clicks / emails)</code></pre>
 <p>Now let’s plot the open rates for each month.</p>
-<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-25-1.png" width="672" /></p>
 <p>What if we instead wanted to look at click through rates? We can define this as the proportion of users <em>that were sent the email</em> that clicked through the CTA.</p>
-<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-20-1.png" width="672" /></p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-26-1.png" width="672" /></p>
 <p>These seem like fairly decent open rates, but low click-thru rates. Unfortunately, we don’t track a <code>client_id</code> for these events, so I’m not sure how we can see how many of these emails were opened on a mobile device. We might need to use SendGrid or Mailchimp for that.</p>
 </div>
 </div>
@@ -173,6 +214,7 @@ wide_actions &lt;- wide_actions %&gt;%
 <h2>Conclusions</h2>
 <p>The data suggests that involuntary churn makes up a significant portion of our overall churn, over 30%. This ratio has been decreasing substantially over the past two years. Subscriptions that are billed annually have much higher involuntary churn rates than those charged monthly.</p>
 <p>Involuntary churn accounts for around 15-20 thousand dollars in MRR lost <em>each month</em>.</p>
+<p><strong><em>Having the customer’s zip code decreases the rate in which payments fail, and I would suggest experimenting with collecting users’ addresses, to further decrease the failed payment rate.</em></strong></p>
 <p>Our dunning emails have relatively high open rates and decent click through rates, but we are unable to tell at the moment how many are opened on mobile devices. We are also unable to say, or estimate, the effects that the emails have on involuntary churn at this time. We may need to run a controlled experiment to make that estimate. :)</p>
 <p>In the future, I would like to calculate involuntary churn rates segmented by country. A charge may be more likely to fail if the customer does not live in the United States. We may be able to mitigate some of this risk by asking for more information about the customer when we try to collect payments.</p>
 </div>
