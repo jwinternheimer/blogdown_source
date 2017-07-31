@@ -1,0 +1,165 @@
+---
+date: 2017-07-28T15:18:52-04:00
+subtitle: ""
+tags: []
+type: "post"
+title: "Buffer for Business Feature Audit"
+---
+
+
+
+<p>In a <a href="https://jwinternheimer.github.io/blog/churn-survey-text-analysis/">previous analysis</a> we noted that the most common reason users gave for churning was that they weren’t using, or didn’t need, Buffer.</p>
+<p>I was inspired by <a href="https://blog.intercom.com/before-you-plan-your-product-roadmap/">this blog post</a> by Intercom’s Chief Strategy Officer to conduct an audit of the features available to Buffer for Business users in order to see which were being used, and how frequently.</p>
+<p>In this post, we will analyze a subset of our features with two simple criteria: how many users use it and how frequently. Then we could theoretically place each feature on a two-dimensional graph like this one:</p>
+<div class="figure">
+<img src="http://blog.intercom.io/wp-content/uploads/2012/07/Graph-Starred.jpg" />
+
+</div>
+<p>The author claims that the features in the top-right quadrant of the graph make up the core of the product, whereas features laying in other quadrants need to be improved, promoted, or removed.</p>
+<p>These are the features we’ll analyze:</p>
+<ul>
+<li>The web composer. This is what people use to schedule updates from Buffer’s web app.</li>
+<li>The browser extension.</li>
+<li>The posts analytics tab.</li>
+<li>The overview analytics tab.</li>
+<li>Calendar</li>
+<li>RSS Feeds</li>
+</ul>
+<p>Each of these features have a group events associated with the core value of the feature. For example, scheduling an update from the web composer would be the main event associated with that feature.</p>
+<p>Let’s go ahead and collect the data.</p>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>We’ll query the Redshift table <code>actions_taken</code> to find the events associated with each user and each feature that we’re interested in analyzing. We’ll use the <code>buffer</code> R package to do this.</p>
+<pre class="sql"><code>select
+  a.user_id
+  , date_trunc(&#39;week&#39;, u.created_at) as user_created_week
+  , a.full_scope
+  , u.billing_plan
+  , date_trunc(&#39;week&#39;, a.date) as week
+  , count(distinct a.id) as actions
+from actions_taken as a
+left join users as u
+  on a.user_id = u.user_id
+where u.billing_plan != &#39;individual&#39;
+  and u.billing_plan != &#39;awesome&#39;
+  and u.billing_plan != &#39;new_awesome&#39;
+  and u.billing_plan != &#39;1&#39;
+  and u.billing_plan is not null
+  and (full_scope like &#39;dashboard updates shared%&#39;
+    or full_scope like &#39;extension composer multiple-composers updates shared%&#39;
+    or full_scope = &#39;dashboard viewed sent_posts&#39;
+    or full_scope = &#39;dashboard analytics overview viewed&#39;
+    or full_scope = &#39;dashboard updates shared feeds&#39;
+    or full_scope = &#39;dashboard feeds added_feed&#39;
+    or full_scope like &#39;dashboard calendar update%&#39;
+    or full_scope = &#39;dashboard calendar week clicked add_post&#39;)
+  and date &gt;= (current_date - 180)
+group by 1, 2, 3, 4, 5</code></pre>
+<p>We now have a dataframe containing 360 thousand unique user-week-feature combinations. There are over 7000 Business customers in this dataset. To compute the percentages properly, we’ll need to collect a bit more data, i.e., the total number of active users for each week. We will define <em>active</em> as having <em>at least 10</em> events in the <code>actions_taken</code> table in a given week.</p>
+<pre class="sql"><code>select
+  a.user_id
+  , u.created_at
+  , u.billing_plan
+  , date_trunc(&#39;week&#39;, a.date) as week
+  , count(distinct a.id) as total_actions
+from actions_taken as a
+left join users as u
+  on a.user_id = u.user_id
+where u.billing_plan != &#39;individual&#39;
+  and u.billing_plan != &#39;awesome&#39;
+  and u.billing_plan != &#39;new_awesome&#39;
+  and u.billing_plan != &#39;1&#39;
+  and u.billing_plan is not null
+  and date &gt;= (current_date - 180)
+group by 1, 2, 3, 4
+having count(distinct a.id) &gt;= 10</code></pre>
+<p>Now we have the <em>total</em> number of Business customers that were <em>active</em> each week in the past 6 months. Now, we just need to do a bit of data transformation to ge tour datasets ready for analysis.</p>
+</div>
+<div id="data-tidying" class="section level2">
+<h2>Data tidying</h2>
+<p>We saved the results of the first query in a dataframe called <code>feature_usage</code>.We need to gather the <code>full_scope</code> values and determine which features they correspond to. For example, we need to know that <code>dashboard updates shared composer now</code> is associated with the main <code>dashboard</code> feature, and so forth.</p>
+<pre class="r"><code># determine the feature corresponding with full scope
+overview &lt;- grepl(&#39;dashboard analytics overview&#39;, feature_usage$full_scope)
+posts &lt;- grepl(&#39;sent_posts&#39;, feature_usage$full_scope)
+feeds &lt;- grepl(&#39;dashboard feeds&#39;, feature_usage$full_scope)
+dashboard &lt;- grepl(&#39;dashboard updates shared&#39;, feature_usage$full_scope)
+extension &lt;- grepl(&#39;extension&#39;, feature_usage$full_scope)
+calendar &lt;- grepl(&#39;calendar&#39;, feature_usage$full_scope)
+
+# assign the feature
+feature_usage$feature &lt;- &quot;&quot;
+feature_usage[overview, ]$feature &lt;- &#39;overview&#39;
+feature_usage[posts, ]$feature &lt;- &#39;posts&#39;
+feature_usage[feeds, ]$feature &lt;- &#39;feeds&#39;
+feature_usage[dashboard, ]$feature &lt;- &#39;dashboard&#39;
+feature_usage[extension, ]$feature &lt;- &#39;extension&#39;
+feature_usage[calendar, ]$feature &lt;- &#39;calendar&#39;</code></pre>
+<p>Alright. Now we have to group the data by feature and week, so that we can see the number of users that used each feature, each week. We will join this dataframe to another dataframe that includes the total number of active users for each week, so that we can calculate the percentage of weekly active users that used each feature.</p>
+<pre class="r"><code># group by feature and week
+weekly_feature_usage &lt;- feature_usage %&gt;%
+  group_by(week, feature) %&gt;%
+  summarise(users = n_distinct(user_id), actions = sum(actions))
+
+# group total usage by week
+weekly_usage &lt;- total_usage %&gt;%
+  group_by(week) %&gt;%
+  summarise(total_users = n_distinct(user_id))
+
+# join in weekly active user counts
+weekly_feature_usage &lt;- weekly_feature_usage %&gt;%
+  inner_join(weekly_usage, by = &#39;week&#39;) %&gt;%
+  mutate(user_percent = users / total_users) </code></pre>
+<p>Now we are ready for some exploratory analysis.</p>
+</div>
+<div id="exploratory-analysis" class="section level2">
+<h2>Exploratory analysis</h2>
+<p>Let’s plot the percentage of WAU that used each feature, each week.</p>
+<p><img src="/blog/business-feature-analysis_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>Around 75-80% of <em>weekly active users</em>, defined as users that took at least 10 actions in a given week, schedule updates with the dashboard composer. It’s interesting to see that this percentage has declined somewhat in recent weeks, but we will ignore that for now.</p>
+<p>Around 45-50% of WAU viewed the Posts tab. This is a high percentage, but it makes sense when you realize that the Posts tab is the default tab under the main Analytics tab.</p>
+<p>Around 35% of WAU schedule updates with the extension each week. We can see this percentage start close to 0 and creep up to around 35% in mid April - this is around the time that we rolled the feature out to Business customers.</p>
+<p>Around 12% of WAU use the Calendar feature, around 7% of WAU view the Overview tab each week, and only around 2% of WAU schedule an update with Feeds or add a new feed.</p>
+<p>These percentages appear relatively stable across time, except for the Overview tab and extension, which are relatively new features. We can plot the median percent of WAU that use each feature in a bar graph.</p>
+<p><img src="/blog/business-feature-analysis_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>Alright. Now let’s see if we can estimate the frequency of usage for each feature. To do this, we will need to count the number of weeks each user used each feature.</p>
+<pre class="r"><code># group by user
+features_by_user &lt;- feature_usage %&gt;%
+  group_by(user_id, user_created_week, feature) %&gt;%
+  summarise(weeks_using_feature = n_distinct(week)) </code></pre>
+<p>Now we need to find the maximum number of possible weeks that these users <em>could have</em> used each feature. In the end we’ll divide the number of weeks each customer used each feature by the number of possible weeks, to get a percentage.</p>
+<pre class="r"><code># get min and max weeks
+min_week &lt;- min(feature_usage$week)
+max_week &lt;- max(feature_usage$week)
+distinct_weeks &lt;- n_distinct(feature_usage$week)
+
+# calculate weeks since joining
+features_by_user &lt;- features_by_user %&gt;%
+  mutate(old_user = user_created_week &lt; min_week) %&gt;%
+  mutate(possible_weeks = ifelse(old_user, distinct_weeks,
+                                 as.numeric((max_week - user_created_week) / 7) + 1)) %&gt;%
+  mutate(percent_of_weeks = weeks_using_feature / possible_weeks)</code></pre>
+<p>Now we can plot the <em>median percentage of weeks used</em> for each feature.</p>
+<p><img src="/blog/business-feature-analysis_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>It’s important to note that these distributions (the percentage of possible weeks that a feature is used) are <em>not</em> normally distributed, so the median might not be the best summary statistic to use here. I thought they would be useful to use to compare usage across features though, so here we are. :)</p>
+<p>Let’s try to recreate that two-dimensional plot from the beginning of this post.</p>
+<p><img src="/blog/business-feature-analysis_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>It looks like the dashboard is the only feature in the top-right quadrant, which makes it the core of the product. This isn’t surprising, but it is interesting to see where the other features lie on the graph. Features that are towards the left of the graph have low <em>adoption</em>.</p>
+<div id="improving-adoption" class="section level3">
+<h3>Improving adoption</h3>
+<p>For any given feature with limited adoption, you have 4 choices:</p>
+<ul>
+<li>Kill it: admit defeat, and start to remove it from your product</li>
+<li>Increase the adoption rate: Get more people to use it</li>
+<li>Increase the frequency: Get people to use it more often</li>
+<li>Deliberately improve it: Make it quantifiably better for those who use it</li>
+</ul>
+<p>To make the right decision, we’d likely want to look deeper into usage and find out <em>why</em> it has limited adoption.</p>
+<p>That might look something like this:</p>
+<div class="figure">
+<img src="http://blog.intercom.io/wp-content/uploads/2013/07/5Whys-messy.png" />
+
+</div>
+<p>Adoption of the Overview tab might be so low because it’s difficult to find, or perhaps people don’t see the value in it, or perhaps it’s too inaccurate. Each reason will have it’s own set of actions we could take to improve adoption.</p>
+<p>Improving <em>frequency</em> presents a different challenge, but I think it can also be addressed!</p>
+</div>
+</div>
