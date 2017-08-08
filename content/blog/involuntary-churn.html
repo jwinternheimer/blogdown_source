@@ -119,6 +119,7 @@ by_month &lt;- events %&gt;%
     charges.card_brand,
     charges.id as charge_id,
     charges.captured,
+    charges.card_country,
     trim(charges.card_address_zip) as card_address_zip,
     trim(charges.card_address_line1) as card_address_line1
   from charges
@@ -130,11 +131,12 @@ select
   date_format(month, &#39;%Y-%m&#39;) as month,
   coalesce(card_brand, &#39;Non-card or Other&#39;) as card,
   captured,
+  card_country,
   length(card_address_zip) &gt; 0 as has_zip,
   length(card_address_line1) &gt; 0 as has_address,
   count(distinct charge_id) as charges
 from charge_information
-group by 1, 2, 3, 4, 5
+group by 1, 2, 3, 4, 5, 6
 order by 1 desc</code></pre>
 <p>To begin, let’s start by just visualizing the percentage of charges that were captured over time.</p>
 <p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
@@ -149,6 +151,17 @@ order by 1 desc</code></pre>
 <p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
 <p>For each type of card, having the zip code improves the capture rate. Awesome! These graphs suggest that having more information decreases the likelihood of a failed payment.</p>
 <p>Therefore I might suggest an experiment in which we also ask for users’ addresses, if they are in the US.</p>
+<div id="how-does-the-country-affect-the-success-rate" class="section level3">
+<h3>How does the country affect the success rate?</h3>
+<p>Let’s first plot out the success rate for US and non-US cards.</p>
+<pre class="r"><code># determine if the card is from the US
+payments &lt;- payments %&gt;% mutate(is_us = (card_country == &#39;US&#39;))</code></pre>
+<p>Now let’s make the plot.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+<p>Now let’s plot out the success rate for each country that has over 3000 charges.</p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
+<p>Israel, Germany, Argentina, Hong Kong, The Netherlands, Singapore, New Zealand, The United States, and Great Britain have the highest success rates, while Saudi Arabia, Turkey, Mexico, India, UAE, Brazil, and South Africa have the lowest success rates.</p>
+</div>
 <div id="what-effect-to-the-reminder-emails-have" class="section level3">
 <h3>What effect to the reminder emails have?</h3>
 <p>This is harder to measure, but we can still do a bit of exploration with our dunning emails. We first need to gather the data, which we can do by querying the <code>user_email_actions</code> table.</p>
@@ -204,9 +217,9 @@ wide_actions &lt;- wide_actions %&gt;%
   mutate(open_rate = email_opens / emails,
          ctr = email_clicks / emails)</code></pre>
 <p>Now let’s plot the open rates for each month.</p>
-<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-25-1.png" width="672" /></p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-28-1.png" width="672" /></p>
 <p>What if we instead wanted to look at click through rates? We can define this as the proportion of users <em>that were sent the email</em> that clicked through the CTA.</p>
-<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-26-1.png" width="672" /></p>
+<p><img src="/blog/involuntary-churn_files/figure-html/unnamed-chunk-29-1.png" width="672" /></p>
 <p>These seem like fairly decent open rates, but low click-thru rates. Unfortunately, we don’t track a <code>client_id</code> for these events, so I’m not sure how we can see how many of these emails were opened on a mobile device. We might need to use SendGrid or Mailchimp for that.</p>
 </div>
 </div>

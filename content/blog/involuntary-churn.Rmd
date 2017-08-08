@@ -200,6 +200,7 @@ with charge_information as (
     charges.card_brand,
     charges.id as charge_id,
   	charges.captured,
+  	charges.card_country,
     trim(charges.card_address_zip) as card_address_zip,
     trim(charges.card_address_line1) as card_address_line1
   from charges
@@ -211,17 +212,23 @@ select
   date_format(month, '%Y-%m') as month,
   coalesce(card_brand, 'Non-card or Other') as card,
   captured,
+  card_country,
   length(card_address_zip) > 0 as has_zip,
   length(card_address_line1) > 0 as has_address,
   count(distinct charge_id) as charges
 from charge_information
-group by 1, 2, 3, 4, 5
+group by 1, 2, 3, 4, 5, 6
 order by 1 desc
 ```
 
 ```{r include = FALSE}
 # Read in data from a csv
 payments <- read.csv('~/Downloads/payment_info.csv', header = T)
+
+# Fix the has_zip and has_address fields
+payments <- payments %>%
+  mutate(has_zip = as.character(has_zip)) %>%
+  mutate(has_zip = as.factor(ifelse(has_zip == "", "false", has_zip)))
 
 # Format the month value
 payments <- payments %>%
@@ -302,6 +309,50 @@ payments %>%
 For each type of card, having the zip code improves the capture rate. Awesome! These graphs suggest that having more information decreases the likelihood of a failed payment. 
 
 Therefore I might suggest an experiment in which we also ask for users' addresses, if they are in the US.
+
+### How does the country affect the success rate?
+Let's first plot out the success rate for US and non-US cards.
+
+```{r}
+# determine if the card is from the US
+payments <- payments %>% mutate(is_us = (card_country == 'US'))
+```
+
+Now let's make the plot.
+
+```{r echo = FALSE}
+payments %>%
+  filter(month >= '2013-01-01') %>%
+  group_by(month, is_us, captured) %>%
+  summarise(charges = sum(charges)) %>%
+  mutate(percent = charges / sum(charges)) %>%
+  filter(captured == 'true' & !(is.na(is_us))) %>%
+  ggplot(aes(x = month, y = percent, color = is_us)) +
+  geom_point() + 
+  geom_line() +
+  scale_y_continuous(limits = c(0.5, 1)) +
+  labs(x = NULL, y = NULL, title = 'Percent of Charges Captured', color = 'Card From US?') +
+  theme_minimal()
+```
+
+Now let's plot out the success rate for each country that has over 3000 charges.
+
+```{r echo = FALSE}
+top_countries <- payments %>%
+  filter(card_country != "") %>%
+  group_by(card_country, captured) %>%
+  summarise(charges = sum(charges)) %>%
+  mutate(percent = charges / sum(charges)) %>%
+  filter(captured == 'true' & charges > 3000) 
+
+ggplot(top_countries) +
+  geom_bar(aes(x = reorder(card_country, -percent), y = percent), stat = 'identity') +
+  theme_minimal() +
+  guides(fill = FALSE) +
+  labs(x = NULL, y = NULL, title = "Charge Success Rate") 
+```
+
+Israel, Germany, Argentina, Hong Kong, The Netherlands, Singapore, New Zealand, The United States, and Great Britain have the highest success rates, while Saudi Arabia, Turkey, Mexico, India, UAE, Brazil, and South Africa have the lowest success rates.
 
 ### What effect to the reminder emails have? 
 This is harder to measure, but we can still do a bit of exploration with our dunning emails. We first need to gather the data, which we can do by querying the `user_email_actions` table.

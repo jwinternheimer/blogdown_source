@@ -1,0 +1,124 @@
+---
+title: "Buffer Demographics"
+output: html_notebook
+---
+
+```{r include = FALSE}
+library(ggplot2); library(dplyr)
+```
+
+```{r}
+# read data
+demo <- read.csv('~/Downloads/demographics.csv', header = T)
+
+# rename columns
+colnames(demo) <- c('gender', 'region', 'age', 'race', 'ip')
+
+# set genders
+demo$gender <- as.character(demo$gender)
+demo <- demo %>%
+  mutate(gender = as.factor(ifelse(gender == "Man" | gender == 'Woman', gender, "Other")))
+```
+
+```{r}
+# group races
+demo$race <- as.character(demo$race)
+
+# assign white races
+white <- c('White/Caucasian', 'English', 'Australian', 'Italian', 'White Jewish', 'Light-skinned Jew', 
+           'Caucasian but just wanted to ask if you can please include emojis on buffer, it will make it soooo much better!', 'European American', 'Turkish cypriot/english')
+
+demo <- demo %>%
+  mutate(race = ifelse(race %in% white, "White", race)) %>%
+  mutate(race = ifelse(race == "South Asian " | race == 'some Indian, some American' | race == 'Pacific Islander', "Asian", race)) %>%
+  mutate(race = ifelse(race == "African American " | race == 'Black/African descent', "Black", race)) 
+
+# assign most common
+common <- c('White', 'Black', 'Hispanic/Latinx', 'Asian', 'Prefer Not to Answer')
+
+demo <- demo %>%
+  mutate(race = ifelse(race %in% common, race, "Other"))
+```
+
+```{r}
+demo %>%
+  count(race) %>%
+  mutate(race = reorder(race, n)) %>%
+  mutate(percent = n / sum(n)) %>%
+  ggplot(aes(x = race, y = percent, fill = race)) +
+  geom_col() +
+  geom_text(aes(label = round(percent, 2)), hjust = -0.2) +
+  guides(fill = FALSE) +
+  coord_flip() +
+  theme_minimal() +
+  theme(text = element_text(size = 15)) +
+  labs(x = NULL, y = "Proportion of Responses", title = NULL) +
+  scale_y_continuous(limits = c(0, 0.8))
+```
+
+
+```{r}
+demo %>%
+  count(gender) %>%
+  mutate(gender = reorder(gender, n)) %>%
+  mutate(percent = n / sum(n)) %>%
+  ggplot(aes(x = gender, y = percent, fill = gender)) +
+  geom_col() +
+  geom_text(aes(label = round(percent, 2)), hjust = -0.2) +
+  guides(fill = FALSE) +
+  coord_flip() +
+  theme_minimal() +
+  theme(text = element_text(size = 15)) +
+  labs(x = NULL, y = "Proportion of Responses", title = NULL) +
+  scale_y_continuous(limits = c(0, 0.6))
+```
+
+```{r}
+demo %>%
+  count(region) %>%
+  mutate(region = reorder(region, n)) %>%
+  mutate(percent = n / sum(n)) %>%
+  ggplot(aes(x = region, y = percent, fill = region)) +
+  geom_col() +
+  geom_text(aes(label = round(percent, 2)), hjust = -0.2) +
+  guides(fill = FALSE) +
+  coord_flip() +
+  theme_minimal() +
+  theme(text = element_text(size = 15)) +
+  labs(x = NULL, y = "Proportion of Responses", title = NULL) +
+  scale_y_continuous(limits = c(0, 0.75))
+```
+
+```{r}
+demo %>%
+  count(age) %>%
+  mutate(age = reorder(age, n)) %>%
+  mutate(percent = n / sum(n)) %>%
+  ggplot(aes(x = age, y = percent, fill = age)) +
+  geom_col() +
+  geom_text(aes(label = round(percent, 2)), hjust = -0.2) +
+  guides(fill = FALSE) +
+  coord_flip() +
+  theme_minimal() +
+  theme(text = element_text(size = 15)) +
+  labs(x = NULL, y = "Proportion of Responses", title = NULL) +
+  scale_y_continuous(limits = c(0, 0.75))
+```
+
+```{r}
+demo %>%
+  mutate(gender_race_age_region = paste(gender, race, age, region, sep = '-')) %>%
+  count(gender_race_age_region) %>%
+  mutate(gender_race_age_region = reorder(gender_race_age_region, n)) %>%
+  mutate(percent = n / sum(n)) %>%
+  filter(percent >= 0.01) %>%
+  ggplot(aes(x = gender_race_age_region, y = percent, fill = gender_race_age_region)) +
+  geom_col() +
+  geom_text(aes(label = round(percent, 2)), hjust = -0.2) +
+  guides(fill = FALSE) +
+  coord_flip() +
+  theme_minimal() +
+  labs(x = NULL, y = "Proportion of Responses", title = NULL) +
+  scale_y_continuous(limits = c(0, 0.2))
+```
+

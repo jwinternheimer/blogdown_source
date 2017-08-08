@@ -1,0 +1,274 @@
+---
+date: 2017-08-07T14:02:25-04:00
+subtitle: ""
+type: "post"
+tags: []
+title: "Predicting Churn with General Linear Models: An Experiment"
+---
+
+In a [previous analysis](https://jwinternheimer.github.io/blog/churn-survey-text-analysis/) we found that the most common reason users give for leaving Buffer is that they weren't using, or didn't need, Buffer.
+
+![](https://jwinternheimer.github.io/blog/churn-survey-text-analysis_files/figure-html/unnamed-chunk-17-1.png)
+
+In this analysis, we'll put that theory to the test. We'll create a [natural experiment](https://en.wikipedia.org/wiki/Natural_experiment) in which users exposed to the experimental and control conditions are determined by their own actions. In other words, we'll identify paying customers that stop using Buffer, or use Buffer at a decreasing rate, and compare them to paying customers with more consistent usage.
+
+How can we tell that users have stopped using Buffer? We have to define _use_ in the right context -- for Buffer, the core value prop is saving time by _scheduling social media posts_. Performing this function is the best proxy we have for getting value from Buffer. 
+
+To find users that are getting no, or less, value out of Buffer, we will look at ther frequency at which Business customers schedule social media posts. We'll use general linear models to identify users whose usage is increasing or decreasing the quickest over time.
+
+To begin, let's collect all of the updates scheduled by _current_ Business customers.
+
+```{r include = FALSE}
+# load libraries
+library(buffer); library(dplyr); library(tidyr); library(ggplot2); library(lubridate)
+library(broom); library(purrr)
+```
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+# connect to redshift
+# con <- redshift_connect()
+```
+
+## Data collection
+The following SQL query returns the number of updates that every Business customer has sent in each week that he or she sent any updates. 
+
+```{sql eval = FALSE}
+select
+  up.user_id
+  , date_trunc('week', u.created_at) as user_created_at
+  , date_trunc('week', up.date) as update_week
+  , count(distinct up.id) as update_count
+from updates as up
+left join users as u
+  on up.user_id = u.user_id
+where up.date >= (current_date - 180)
+  and up.status <> 'service'
+  and u.billing_plan != 'individual'
+  and u.billing_plan != 'awesome'
+  and u.billing_plan != 'new_awesome'
+  and u.billing_plan != '1'
+  and u.billing_plan is not null
+group by 1, 2, 3
+```
+
+```{r include = FALSE}
+# save updates data
+# saveRDS(biz_users, file = 'biz_users.rds')
+
+# load updates data
+biz_users <- readRDS('biz_users.rds')
+```
+
+Users that are on Buffer for Business trials are considered to be Business users in this query, so We'll want to filter this dataset to include only business users that have at least one successful charge. The following query will give us the number of successful charges for each user.
+
+```{sql eval = FALSE}
+select
+	c.customer
+	, u.user_id
+	, count(distinct c.id) as charges
+from stripe._charges as c
+inner join users as u
+	on u.billing_stripe_id = c.customer
+left join stripe._invoices as i
+	on c.invoice = i.id
+left join stripe._subscriptions as s
+	on i.subscription_id = s.id
+where c.captured = TRUE
+and c.created >= (current_date - 365)
+and s.plan_id != 'pro-monthly'
+and s.plan_id != 'pro-annual'
+and s.plan_id not like '%awesome%'
+group by 1, 2
+```
+
+```{r include = FALSE}
+# save charges data
+# saveRDS(biz_charges, file = 'biz_charges.rds')
+
+# load charges data
+biz_charges <- readRDS('biz_charges.rds')
+```
+
+Now we join the two datasets with an `inner_join`, so that only users with successful charges are included.
+
+```{r}
+# join charges and updates data
+users <- biz_users %>%
+  inner_join(biz_charges, by = 'user_id')
+
+# set dates as dates
+users$user_created_at <- as.Date(users$user_created_at, format = '%Y-%m-%d')
+users$update_week <- as.Date(users$update_week, format = '%Y-%m-%d')
+
+# remove unneeded datasets
+rm(biz_users); rm(biz_charges)
+```
+
+## Data tidying
+Now we have an interesting problem. We have the number of updates that each Business customer send in weeks that he or she schedule any updates, but we don't have any information on the weeks in which they didn't sschdule any updates. We need to fill the dataset so that each user has a value for each week, even if it's zero.
+
+Luckily for us, the `complete()` function in the `tidyr` package is made for exactly that purpose. We will add a couple more filters, to exclude the current week (which is not yet over) and to exclude weeks that came before the user signed up for Buffer
+
+```{r}
+# complete the data frame
+users_complete <- users %>%
+  filter(update_week != '2017-08-07') %>%
+  complete(user_id, update_week, fill = list(update_count = 0)) %>%
+  select(user_id, update_week, update_count) %>%
+  left_join(select(users, c(user_id, user_created_at)), by = 'user_id') %>%
+  filter(update_week >= user_created_at)
+```
+
+Great, now we have a tidy data frame that contains the number of updates that each Business customer sent each week. In order to calculate the rate at which users' usage is changing over time, we'll need a bit more information. First, we add columns to the data frame for the total number updates scheduled by each person. We can then `filter()` to only keep users that have scheduled updates in at least 4 weeks.
+
+We will also add a column for the total number of updates scheduled by each user.
+
+```{r}
+# get year value
+users_complete <- users_complete %>%
+  mutate(year = year(update_week) + yday(update_week) / 365)
+
+# get the overall update totals and number of weeksfor each user
+update_totals <- users_complete %>%
+  group_by(user_id) %>%
+  summarize(update_total = sum(update_count), 
+            number_of_weeks = n_distinct(update_week[update_count > 0])) %>%
+  filter(number_of_weeks >= 4)
+
+# count the updates by week
+update_week_counts <- users_complete %>% 
+  inner_join(update_totals, by = 'user_id') %>%
+  filter(update_week != '2017-08-07')
+
+update_week_counts
+```
+
+## Using general linear models
+We can think about this modeling technique answering questions like: "did a given user schedule any updates in a given week? Yes or no? How does the count of updates depend on time?"
+
+The specific technique we'll use is this:
+  
+  - Use the `nest()` function to make a data frame with a list column that contains little miniature data frames for each user.
+  
+  - Use the `map()` function to apply our modeling procedure to each of those little data frames inside our big data frame.
+  
+  - This is count data so let’s use `glm()` with `family = "binomial"` for modeling.
+  
+  - We'll pull out the slopes and p-values from each of these models. We are comparing many slopes here and some of them are not statistically significant, so let’s apply an adjustment to the p-values for multiple comparisons. 
+
+Let's run the models.
+  
+```{r warning = FALSE, message = FALSE}
+# create logistic regression model
+mod <- ~ glm(cbind(update_count, update_total) ~ year, ., family = "binomial")
+
+# calculate growth rates for each user
+slopes <- update_week_counts %>%
+  nest(-user_id) %>%
+  mutate(model = map(data, mod)) %>%
+  unnest(map(model, tidy)) %>%
+  filter(term == "year") %>%
+  arrange(desc(estimate))
+
+slopes %>% arrange(estimate)
+```
+
+We're finding out how influential the "time" factor is to the number of updates scheudled over time. If the slope is negative and large in magnitude, it suggests that update counts decrease significantly over time. Let's plot the 12 users with the largest _negative_ model estimates.
+
+```{r echo = FALSE}
+slopes %>%
+  arrange(estimate) %>%
+  head(12) %>%
+  inner_join(users_complete, by = "user_id") %>%
+  mutate(user_id = reorder(user_id, -estimate)) %>%
+  filter(update_week != '2017-08-07') %>%
+  ggplot(aes(x = update_week, y = update_count, color = user_id)) +
+  geom_line(show.legend = FALSE) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~ user_id, scales = "free_y") +
+  expand_limits(y = 0) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = NULL, y = NULL, title = "User Updates")
+```
+
+We can see that each of these users have experienced quite a dramatic drop in the number of updates scheduled over time. Let's look at the 12 users with the largest _positive_ estimates.
+
+```{r echo = FALSE}
+slopes %>%
+  arrange(desc(estimate)) %>%
+  head(12) %>%
+  inner_join(users_complete, by = "user_id") %>%
+  mutate(user_id = reorder(user_id, -estimate)) %>%
+  filter(update_week != '2017-08-07') %>%
+  ggplot(aes(x = update_week, y = update_count, color = user_id)) +
+  geom_line(show.legend = FALSE) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~ user_id, scales = "free_y") +
+  expand_limits(y = 0) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = NULL, y = NULL, title = "User Updates")
+```
+
+Each of these users saw a dramatic increase in the number of updates scheduled at some point. Notice the single user that scheduled 2500 updates in a single week, and _none_ in the next. We'll want to filter users like that out.
+
+Now, let's look at users that have the smallest model estimates in terms of magnitude. These should represent users with more consistent updating habits.
+
+```{r echo = FALSE}
+slopes %>%
+  arrange(abs(estimate)) %>%
+  head(12) %>%
+  inner_join(users_complete, by = "user_id") %>%
+  mutate(user_id = reorder(user_id, -estimate)) %>%
+  filter(update_week != '2017-08-07') %>%
+  ggplot(aes(x = update_week, y = update_count, color = user_id)) +
+  geom_line(show.legend = FALSE) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~ user_id, scales = "free_y") +
+  expand_limits(y = 0) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = NULL, y = NULL, title = "User Updates")
+```
+
+Just like we thought!
+
+## Hypothesis
+My hypothesis is that the users with the lowest model estimates (`estimate <= - 5` and `p.value <= 0.05`) -- those who have seen the number of updates scheduled decrease the quickest -- are more likely to churn in the next two months than users with estimates greater than or equal to zero. 
+
+To test this hypothesis, I'll gather all of those users (there are 726 of them) and monitor their churn rates over the next 60 days. I will compare these to the churn rates of the rest of the users, which will act as a control group.
+
+```{r}
+slopes %>%
+  filter(p.value < 0.05 & estimate <= -5) %>%
+  arrange(estimate)
+```
+
+```{r echo = FALSE}
+users_complete %>%
+  filter(user_id == '588684576d19b8a25536abbc') %>%
+  ggplot(aes(x = update_week, y = update_count)) +
+  geom_point() +
+  geom_line() +
+  labs(x = NULL, y = NULL, title = "Updates Sent By User 588684576d19b8a25536abbc")
+```
+
+## Questions and assumptions
+There are numerous small decisions made in this analysis that can have an effect on the outcome. Let's go through them and address some questions that should be asked of the analyst.
+
+**Why filter out users with less than 4 weeks of updates?**
+This is a very valid question. I can easily see a case in which a Business customer signs up, schedules updates for a week or two, decides Buffer isn't right, and churns. In fact, we know that the first month is the riskiest for churn, so we're leaving out a lot of churn candidates from the off. 
+
+It was a tricky decision, but in the end I decided to only look at Business customers with at least 4 weeks of updates so that the general linear models would have a sufficient amount of data to work with. You can imagine that it would be difficult to fit any type of model to a dataset with only two observations. It's impossible with only one observation (this would be the case for users that have only sent updates on one week). It makes the graphs look pretty, and helps the model work well.
+
+This is one assumption I would love to revisit and relax a bit. I think we can change it to three weeks, or perhaps even two, without much cost.
+
+**If it's a natural experiment, why not look at users in the past?**
+This is also a completely fair question. We should be able to apply these exact same techniques on historical data and view the outcomes, without having to wait for 60 days. I didn't do that because 1) it's difficult to find what plan a user had on a given date, but it's easy to find for the _current date_. This is a very common problem that we should find a solution for, but I took the easy route.
+
+This also opens up the option of designing another experiment in which we intervene on one, or both groups, to see if the intervention (an email) affects the churn rate.
+
+That's it for now! Please share any thoughts, comments, or questions!
+
+```{r}
+detach("package:lubridate", unload=TRUE)
+```
+

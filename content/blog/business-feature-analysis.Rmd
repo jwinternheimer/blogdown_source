@@ -6,7 +6,7 @@ type: "post"
 title: "Buffer for Business Feature Audit"
 ---
 
-In a [previous analysis](https://jwinternheimer.github.io/blog/churn-survey-text-analysis/) we noted that the most common reason users gave for churning was that they weren't using, or didn't need, Buffer.
+In a [previous analysis](https://jwinternheimer.github.io/blog/churn-survey-text-analysis/) we discovered that the most common reason users gave for churning was that they weren't using, or didn't need, Buffer.
 
 I was inspired by [this blog post](https://blog.intercom.com/before-you-plan-your-product-roadmap/) by Intercom's Chief Strategy Officer to conduct an audit of the features available to Buffer for Business users in order to see which were being used, and how frequently. 
 
@@ -18,19 +18,19 @@ The author claims that the features in the top-right quadrant of the graph make 
 
 These are the features we'll analyze:
 
- - The web composer. This is what people use to schedule updates from Buffer's web app.
- - The browser extension.
- - The posts analytics tab.
- - The overview analytics tab.
+ - The web composer
+ - The browser extension
+ - The posts analytics tab
+ - The overview analytics tab
  - Calendar
  - RSS Feeds
  
 Each of these features have a group events associated with the core value of the feature. For example, scheduling an update from the web composer would be the main event associated with that feature. 
 
-Let's go ahead and collect the data.
+Let's go ahead and collect the feature usage data _for Business customers_.
 
 ## Data collection
-We'll query the Redshift table `actions_taken` to find the events associated with each user and each feature that we're interested in analyzing. We'll use the `buffer` R package to do this.
+Let's query the Redshift table `actions_taken` to find the events associated with each user and each feature that we're interested in analyzing. We'll use the `buffer` R package to do this.
 
 ```{r include = FALSE}
 library(buffer); library(dplyr); library(ggplot2)
@@ -79,7 +79,40 @@ feature_usage$user_created_week <- as.Date(feature_usage$user_created_week, "%Y-
 feature_usage$week <- as.Date(feature_usage$week, "%Y-%m-%d")
 ```
 
-We now have a dataframe containing 360 thousand unique user-week-feature combinations. There are over 7000 Business customers in this dataset. To compute the percentages properly, we'll need to collect a bit more data, i.e., the total number of active users for each week. We will define _active_ as having _at least 10_ events in the `actions_taken` table in a given week.
+We now have a dataframe containing 360 thousand unique user-week-feature combinations. There are over 7000 Business customers in this dataset. 
+
+Now we need to collect data from the `updates` table to determine how many Business users scheduled updates from one of the mobile apps each week.
+
+```{sql eval = FALSE}
+select
+  up.user_id
+  , date_trunc('week', up.date) as week
+  , count(distinct up.id) as update_count
+from updates as up
+left join users as u
+  on up.user_id = u.user_id
+where up.client_id in ('4e9680b8512f7e6b22000000','4e9680c0512f7ed322000000') 
+  and u.billing_plan != 'individual'
+  and u.billing_plan != 'awesome'
+  and u.billing_plan != 'new_awesome'
+  and u.billing_plan != '1'
+  and u.billing_plan is not null 
+  and up.date >= (current_date - 180)
+group by 1, 2
+```
+
+```{r include = FALSE}
+# Set date as date object
+# mobile_updates$week <- as.Date(mobile_updates$week, format = "%Y-%m-%d")
+
+# save data
+# save(mobile_updates, file = "mobile_updates.Rda")
+
+# load data
+load("mobile_updates.Rda")
+```
+
+To compute the proportions, we'll need to collect a bit more data. We need the total number of active users for each week. We will define _active_ as having _at least 20_ events in the `actions_taken` table in a given week.
 
 ```{sql eval = FALSE}
 select
@@ -98,7 +131,7 @@ where u.billing_plan != 'individual'
   and u.billing_plan is not null
   and date >= (current_date - 180)
 group by 1, 2, 3, 4
-having count(distinct a.id) >= 10
+having count(distinct a.id) >= 20
 ```
 
 ```{r include = FALSE}
@@ -113,7 +146,51 @@ total_usage$created_at <- as.Date(total_usage$created_at, format = "%Y-%m-%d")
 total_usage$week <- as.Date(total_usage$week, format = "%Y-%m-%d")
 ```
 
-Now we have the _total_ number of Business customers that were _active_ each week in the past 6 months. Now, we just need to do a bit of data transformation to ge tour datasets ready for analysis.
+Now we have the _total_ number of Business customers that were _active_ each week in the past 6 months. Now, we just need to do a bit of cleaning to make sure we have a representative sample of our target population (Business customers).
+
+We need to make sure that the users in our datasets are actual Business customers and not just Business trialists. Trialists have Business plans listed in their Mongo user object, so we need to make sure that there is actually a successful charge associated with the user. To do that, we'll find the number of successful charges for all users in the past year, and `inner_join` it with our current datasets. We'll use the following query: 
+
+```{sql eval = FALSE}
+select
+	c.customer
+	, u.user_id
+	, count(distinct c.id) as charges
+from stripe._charges as c
+inner join users as u
+	on u.billing_stripe_id = c.customer
+left join stripe._invoices as i
+	on c.invoice = i.id
+left join stripe._subscriptions as s
+	on i.subscription_id = s.id
+where c.captured = TRUE
+and c.created >= (current_date - 365)
+and s.plan_id != 'pro-monthly'
+and s.plan_id != 'pro-annual'
+and s.plan_id not like '%awesome%'
+group by 1, 2
+```
+
+```{r include = FALSE}
+# save data
+# save(charges, file = "business_charges.Rda")
+
+# load data
+load("business_charges.Rda")
+```
+
+Now we need to join the number of successful charges into our `feature_usage` and `total_usage` dataframes.
+
+```{r}
+# join feature usage and charges
+feature_usage <- feature_usage %>%
+  inner_join(charges, by = 'user_id')
+
+# join total usage and charges
+total_usage <- total_usage %>%
+  inner_join(charges, by = 'user_id')
+```
+
+Alright, we're getting closer. :) 
 
 ## Data tidying
 We saved the results of the first query in a dataframe called `feature_usage`.We need to gather the `full_scope` values and determine which features they correspond to. For example, we need to know that `dashboard updates shared composer now` is associated with the main `dashboard` feature, and so forth.
@@ -137,7 +214,7 @@ feature_usage[extension, ]$feature <- 'extension'
 feature_usage[calendar, ]$feature <- 'calendar'
 ```
 
-Alright. Now we have to group the data by feature and week, so that we can see the number of users that used each feature, each week. We will join this dataframe to another dataframe that includes the total number of active users for each week, so that we can calculate the percentage of weekly active users that used each feature.
+Now we have to group the data by `feature` and `week`, so that we can see the number of users that used each feature, each week. We will join this dataframe to another dataframe that includes the total number of active users for each week, so that we can calculate the percentage of weekly active users that used each feature.
 
 ```{r}
 # group by feature and week
@@ -156,7 +233,7 @@ weekly_feature_usage <- weekly_feature_usage %>%
   mutate(user_percent = users / total_users) 
 ```
 
-Now we are ready for some exploratory analysis.
+We are ready for some exploratory analysis.
 
 ## Exploratory analysis
 Let's plot the percentage of WAU that used each feature, each week.
@@ -254,6 +331,7 @@ feature_stats <- number_of_users %>%
 ggplot(feature_stats, aes(x = med_percent, y = median_percent_of_weeks, color = feature)) +
   geom_point(size = 5) +
   geom_text(aes(label = feature), hjust = -0.1, vjust = -1) +
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed') +
   theme_minimal() +
   guides(color = FALSE) +
   scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
@@ -262,6 +340,8 @@ ggplot(feature_stats, aes(x = med_percent, y = median_percent_of_weeks, color = 
 ```
 
 It looks like the dashboard is the only feature in the top-right quadrant, which makes it the core of the product. This isn't surprising, but it is interesting to see where the other features lie on the graph. Features that are towards the left of the graph have low _adoption_.
+
+The dashed line cuts represents the point at which the percentage of WAUs using a feature equals the percent of weeks that WAUs use the feature.
 
 ### Improving adoption
 For any given feature with limited adoption, you have 4 choices:
