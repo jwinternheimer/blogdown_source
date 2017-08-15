@@ -69,6 +69,7 @@ group by 1, 2, 3</code></pre>
     left join stripe._subscriptions as s
         on i.subscription_id = s.id
   where c.created &gt;= (current_date - 365)
+    and s.status = &#39;active&#39;
     and lower(s.plan_id) not like &#39;%awesome%&#39;
     and lower(s.plan_id) not like &#39;%pro%&#39;
     and lower(s.plan_id) not like &#39;%respond%&#39;
@@ -120,7 +121,7 @@ update_week_counts &lt;- users_complete %&gt;%
   filter(update_week != max(users$update_week))
 
 update_week_counts</code></pre>
-<pre><code>## # A tibble: 2,900,509 x 7
+<pre><code>## # A tibble: 2,854,151 x 7
 ##                     user_id update_week update_count user_created_at
 ##                       &lt;chr&gt;      &lt;date&gt;        &lt;dbl&gt;          &lt;date&gt;
 ##  1 000000000000000000000354  2017-02-13            0      2011-01-24
@@ -133,7 +134,7 @@ update_week_counts</code></pre>
 ##  8 000000000000000000000354  2017-02-13            0      2011-01-24
 ##  9 000000000000000000000354  2017-02-13            0      2011-01-24
 ## 10 000000000000000000000354  2017-02-13            0      2011-01-24
-## # ... with 2,900,499 more rows, and 3 more variables: year &lt;dbl&gt;,
+## # ... with 2,854,141 more rows, and 3 more variables: year &lt;dbl&gt;,
 ## #   update_total &lt;dbl&gt;, number_of_weeks &lt;int&gt;</code></pre>
 </div>
 <div id="using-general-linear-models" class="section level2">
@@ -159,7 +160,7 @@ slopes &lt;- update_week_counts %&gt;%
   arrange(desc(estimate))
 
 slopes %&gt;% arrange(estimate)</code></pre>
-<pre><code>## # A tibble: 6,048 x 6
+<pre><code>## # A tibble: 5,910 x 6
 ##                     user_id  term   estimate std.error  statistic
 ##                       &lt;chr&gt; &lt;chr&gt;      &lt;dbl&gt;     &lt;dbl&gt;      &lt;dbl&gt;
 ##  1 5975dfd5e2a81d325d08ec34  year -103.97157  7.047964 -14.751999
@@ -172,7 +173,7 @@ slopes %&gt;% arrange(estimate)</code></pre>
 ##  8 5965f441afabd391594784a7  year  -53.21697  5.833854  -9.122095
 ##  9 58dcf362df84518a535e4525  year  -51.14843  3.436332 -14.884600
 ## 10 594b41571908cdb909a58185  year  -49.90948  4.240515 -11.769676
-## # ... with 6,038 more rows, and 1 more variables: p.value &lt;dbl&gt;</code></pre>
+## # ... with 5,900 more rows, and 1 more variables: p.value &lt;dbl&gt;</code></pre>
 <p>We’re finding out how influential the “time” factor is to the number of updates scheudled over time. If the slope is negative and large in magnitude, it suggests that update counts decrease significantly over time. Let’s plot the 12 users with the largest <em>negative</em> model estimates.</p>
 <p><img src="/blog/churn-prediction_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
 <p>We can see that each of these users have experienced quite a dramatic drop in the number of updates scheduled over time. Let’s look at the 12 users with the largest <em>positive</em> estimates.</p>
@@ -189,7 +190,7 @@ slopes %&gt;% arrange(estimate)</code></pre>
 <pre class="r"><code>slopes %&gt;%
   filter(p.value &lt; 0.05 &amp; estimate &lt;= -5) %&gt;%
   arrange(estimate)</code></pre>
-<pre><code>## # A tibble: 778 x 6
+<pre><code>## # A tibble: 738 x 6
 ##                     user_id  term   estimate std.error  statistic
 ##                       &lt;chr&gt; &lt;chr&gt;      &lt;dbl&gt;     &lt;dbl&gt;      &lt;dbl&gt;
 ##  1 5975dfd5e2a81d325d08ec34  year -103.97157  7.047964 -14.751999
@@ -202,7 +203,7 @@ slopes %&gt;% arrange(estimate)</code></pre>
 ##  8 5965f441afabd391594784a7  year  -53.21697  5.833854  -9.122095
 ##  9 58dcf362df84518a535e4525  year  -51.14843  3.436332 -14.884600
 ## 10 594b41571908cdb909a58185  year  -49.90948  4.240515 -11.769676
-## # ... with 768 more rows, and 1 more variables: p.value &lt;dbl&gt;</code></pre>
+## # ... with 728 more rows, and 1 more variables: p.value &lt;dbl&gt;</code></pre>
 <p>Here is one example of a user with an estimate less than -5 and a p-value less than 0.05.</p>
 <p><img src="/blog/churn-prediction_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
 <p>Will they churn? Let’s assign users to experiment groups, based on their slope estimates.</p>

@@ -95,6 +95,7 @@ with recent_charges as ( -- get most recent charge ID for each customer
 	left join stripe._subscriptions as s
 		on i.subscription_id = s.id
   where c.created >= (current_date - 365)
+    and s.status = 'active'
     and lower(s.plan_id) not like '%awesome%'
     and lower(s.plan_id) not like '%pro%'
     and lower(s.plan_id) not like '%respond%'
