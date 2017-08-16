@@ -204,9 +204,7 @@ slopes %&gt;% arrange(estimate)</code></pre>
 ##  9 58dcf362df84518a535e4525  year  -51.14843  3.436332 -14.884600
 ## 10 594b41571908cdb909a58185  year  -49.90948  4.240515 -11.769676
 ## # ... with 728 more rows, and 1 more variables: p.value &lt;dbl&gt;</code></pre>
-<p>Here is one example of a user with an estimate less than -5 and a p-value less than 0.05.</p>
-<p><img src="/blog/churn-prediction_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
-<p>Will they churn? Let’s assign users to experiment groups, based on their slope estimates.</p>
+<p>Now let’s assign users to experiment groups, based on their slope estimates.</p>
 <pre class="r"><code># get user and subscription attributes
 user_facts &lt;- users %&gt;%
   select(user_id, id:tax_percent) %&gt;%

@@ -270,18 +270,7 @@ slopes %>%
   arrange(estimate)
 ```
 
-Here is one example of a user with an estimate less than -5 and a p-value less than 0.05.
-
-```{r echo = FALSE}
-users_complete %>%
-  filter(user_id == '588684576d19b8a25536abbc') %>%
-  ggplot(aes(x = update_week, y = update_count)) +
-  geom_point() +
-  geom_line() +
-  labs(x = NULL, y = NULL, title = "Updates Sent By User 588684576d19b8a25536abbc")
-```
-
-Will they churn? Let's assign users to experiment groups, based on their slope estimates.
+Now let's assign users to experiment groups, based on their slope estimates.
 
 ```{r}
 # get user and subscription attributes
