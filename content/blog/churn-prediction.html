@@ -1,5 +1,5 @@
 ---
-date: 2017-08-15T14:02:25-04:00
+date: 2017-08-16T14:02:25-04:00
 subtitle: ""
 type: "post"
 tags: []
@@ -54,13 +54,14 @@ group by 1, 2, 3</code></pre>
     ) -- get info on the last subscription with a successful charge
     select
         c.created
-        , c.id
+        , c.id as charge_id
         , c.invoice
-        , c.customer
+        , c.customer as customer_id
         , u.user_id
         , c.captured
         , i.subscription_id
         , s.*
+        , p.interval
     from last_charge as c
     left join users as u
       on u.billing_stripe_id = c.customer
@@ -68,6 +69,8 @@ group by 1, 2, 3</code></pre>
         on c.invoice = i.id
     left join stripe._subscriptions as s
         on i.subscription_id = s.id
+    left join stripe._plans as p
+      on s.plan_id = p.id
   where c.created &gt;= (current_date - 365)
     and s.status = &#39;active&#39;
     and lower(s.plan_id) not like &#39;%awesome%&#39;
@@ -121,7 +124,7 @@ update_week_counts &lt;- users_complete %&gt;%
   filter(update_week != max(users$update_week))
 
 update_week_counts</code></pre>
-<pre><code>## # A tibble: 2,854,151 x 7
+<pre><code>## # A tibble: 2,854,197 x 7
 ##                     user_id update_week update_count user_created_at
 ##                       &lt;chr&gt;      &lt;date&gt;        &lt;dbl&gt;          &lt;date&gt;
 ##  1 000000000000000000000354  2017-02-13            0      2011-01-24
@@ -134,7 +137,7 @@ update_week_counts</code></pre>
 ##  8 000000000000000000000354  2017-02-13            0      2011-01-24
 ##  9 000000000000000000000354  2017-02-13            0      2011-01-24
 ## 10 000000000000000000000354  2017-02-13            0      2011-01-24
-## # ... with 2,854,141 more rows, and 3 more variables: year &lt;dbl&gt;,
+## # ... with 2,854,187 more rows, and 3 more variables: year &lt;dbl&gt;,
 ## #   update_total &lt;dbl&gt;, number_of_weeks &lt;int&gt;</code></pre>
 </div>
 <div id="using-general-linear-models" class="section level2">
@@ -160,20 +163,20 @@ slopes &lt;- update_week_counts %&gt;%
   arrange(desc(estimate))
 
 slopes %&gt;% arrange(estimate)</code></pre>
-<pre><code>## # A tibble: 5,910 x 6
-##                     user_id  term   estimate std.error  statistic
-##                       &lt;chr&gt; &lt;chr&gt;      &lt;dbl&gt;     &lt;dbl&gt;      &lt;dbl&gt;
-##  1 5975dfd5e2a81d325d08ec34  year -103.97157  7.047964 -14.751999
-##  2 59649924a73330287bb13cd0  year  -92.91866  3.845155 -24.165126
-##  3 59482025a73330622578bbc2  year  -85.03305  6.841177 -12.429593
-##  4 58dd14e3e84fe7ca6de31ad6  year  -67.27158  6.535983 -10.292496
-##  5 582cb426d7c2adf717eb697b  year  -63.19568  3.067459 -20.601962
-##  6 596457f51908cd0f7f34bc69  year  -60.91291  5.715369 -10.657739
-##  7 58e55331d842957a4d0ea6bf  year  -54.06255  4.071159 -13.279400
-##  8 5965f441afabd391594784a7  year  -53.21697  5.833854  -9.122095
-##  9 58dcf362df84518a535e4525  year  -51.14843  3.436332 -14.884600
-## 10 594b41571908cdb909a58185  year  -49.90948  4.240515 -11.769676
-## # ... with 5,900 more rows, and 1 more variables: p.value &lt;dbl&gt;</code></pre>
+<pre><code>## # A tibble: 5,907 x 6
+##                     user_id  term   estimate std.error statistic
+##                       &lt;chr&gt; &lt;chr&gt;      &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
+##  1 5975dfd5e2a81d325d08ec34  year -104.17224  6.068335 -17.16653
+##  2 59649924a73330287bb13cd0  year  -92.91866  3.845155 -24.16513
+##  3 59482025a73330622578bbc2  year  -85.03305  6.841177 -12.42959
+##  4 58dd14e3e84fe7ca6de31ad6  year  -67.27158  6.535983 -10.29250
+##  5 596457f51908cd0f7f34bc69  year  -60.91291  5.715369 -10.65774
+##  6 58e55331d842957a4d0ea6bf  year  -54.06255  4.071159 -13.27940
+##  7 5965f441afabd391594784a7  year  -53.55497  5.040584 -10.62475
+##  8 582cb426d7c2adf717eb697b  year  -52.10927  2.902852 -17.95106
+##  9 58dcf362df84518a535e4525  year  -51.14843  3.436332 -14.88460
+## 10 594b41571908cdb909a58185  year  -49.90948  4.240515 -11.76968
+## # ... with 5,897 more rows, and 1 more variables: p.value &lt;dbl&gt;</code></pre>
 <p>We’re finding out how influential the “time” factor is to the number of updates scheudled over time. If the slope is negative and large in magnitude, it suggests that update counts decrease significantly over time. Let’s plot the 12 users with the largest <em>negative</em> model estimates.</p>
 <p><img src="/blog/churn-prediction_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
 <p>We can see that each of these users have experienced quite a dramatic drop in the number of updates scheduled over time. Let’s look at the 12 users with the largest <em>positive</em> estimates.</p>
@@ -186,28 +189,28 @@ slopes %&gt;% arrange(estimate)</code></pre>
 <div id="hypothesis" class="section level2">
 <h2>Hypothesis</h2>
 <p>My hypothesis is that the users with the lowest model estimates (<code>estimate &lt;= - 5</code> and <code>p.value &lt;= 0.05</code>) – those who have seen the number of updates scheduled decrease the quickest – are more likely to churn in the next two months than users with estimates greater than or equal to zero.</p>
-<p>To test this hypothesis, I’ll gather all of those users (there are 778 of them) and monitor their churn rates over the next 60 days. I will compare these to the churn rates of the rest of the users, which will act as a control group.</p>
+<p>To test this hypothesis, I’ll gather all of those users (there are 717 of them) and monitor their churn rates over the next 60 days. I will compare these to the churn rates of the rest of the users, which will act as a control group.</p>
 <pre class="r"><code>slopes %&gt;%
   filter(p.value &lt; 0.05 &amp; estimate &lt;= -5) %&gt;%
   arrange(estimate)</code></pre>
-<pre><code>## # A tibble: 738 x 6
-##                     user_id  term   estimate std.error  statistic
-##                       &lt;chr&gt; &lt;chr&gt;      &lt;dbl&gt;     &lt;dbl&gt;      &lt;dbl&gt;
-##  1 5975dfd5e2a81d325d08ec34  year -103.97157  7.047964 -14.751999
-##  2 59649924a73330287bb13cd0  year  -92.91866  3.845155 -24.165126
-##  3 59482025a73330622578bbc2  year  -85.03305  6.841177 -12.429593
-##  4 58dd14e3e84fe7ca6de31ad6  year  -67.27158  6.535983 -10.292496
-##  5 582cb426d7c2adf717eb697b  year  -63.19568  3.067459 -20.601962
-##  6 596457f51908cd0f7f34bc69  year  -60.91291  5.715369 -10.657739
-##  7 58e55331d842957a4d0ea6bf  year  -54.06255  4.071159 -13.279400
-##  8 5965f441afabd391594784a7  year  -53.21697  5.833854  -9.122095
-##  9 58dcf362df84518a535e4525  year  -51.14843  3.436332 -14.884600
-## 10 594b41571908cdb909a58185  year  -49.90948  4.240515 -11.769676
-## # ... with 728 more rows, and 1 more variables: p.value &lt;dbl&gt;</code></pre>
+<pre><code>## # A tibble: 717 x 6
+##                     user_id  term   estimate std.error statistic
+##                       &lt;chr&gt; &lt;chr&gt;      &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
+##  1 5975dfd5e2a81d325d08ec34  year -104.17224  6.068335 -17.16653
+##  2 59649924a73330287bb13cd0  year  -92.91866  3.845155 -24.16513
+##  3 59482025a73330622578bbc2  year  -85.03305  6.841177 -12.42959
+##  4 58dd14e3e84fe7ca6de31ad6  year  -67.27158  6.535983 -10.29250
+##  5 596457f51908cd0f7f34bc69  year  -60.91291  5.715369 -10.65774
+##  6 58e55331d842957a4d0ea6bf  year  -54.06255  4.071159 -13.27940
+##  7 5965f441afabd391594784a7  year  -53.55497  5.040584 -10.62475
+##  8 582cb426d7c2adf717eb697b  year  -52.10927  2.902852 -17.95106
+##  9 58dcf362df84518a535e4525  year  -51.14843  3.436332 -14.88460
+## 10 594b41571908cdb909a58185  year  -49.90948  4.240515 -11.76968
+## # ... with 707 more rows, and 1 more variables: p.value &lt;dbl&gt;</code></pre>
 <p>Now let’s assign users to experiment groups, based on their slope estimates.</p>
 <pre class="r"><code># get user and subscription attributes
 user_facts &lt;- users %&gt;%
-  select(user_id, id:tax_percent) %&gt;%
+  select(user_id, charge_id:interval) %&gt;%
   unique()
 
 # join user facts to slopes

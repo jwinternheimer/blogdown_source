@@ -1,5 +1,5 @@
 ---
-date: 2017-08-15T14:02:25-04:00
+date: 2017-08-16T14:02:25-04:00
 subtitle: ""
 type: "post"
 tags: []
@@ -80,13 +80,14 @@ with recent_charges as ( -- get most recent charge ID for each customer
 	) -- get info on the last subscription with a successful charge
 	select
 		c.created
-		, c.id
+		, c.id as charge_id
 		, c.invoice
-		, c.customer
+		, c.customer as customer_id
 		, u.user_id
 		, c.captured
 		, i.subscription_id
 		, s.*
+		, p.interval
 	from last_charge as c
 	left join users as u
 	  on u.billing_stripe_id = c.customer
@@ -94,6 +95,8 @@ with recent_charges as ( -- get most recent charge ID for each customer
 		on c.invoice = i.id
 	left join stripe._subscriptions as s
 		on i.subscription_id = s.id
+	left join stripe._plans as p
+	  on s.plan_id = p.id
   where c.created >= (current_date - 365)
     and s.status = 'active'
     and lower(s.plan_id) not like '%awesome%'
@@ -262,7 +265,7 @@ Just like we thought!
 ## Hypothesis
 My hypothesis is that the users with the lowest model estimates (`estimate <= - 5` and `p.value <= 0.05`) -- those who have seen the number of updates scheduled decrease the quickest -- are more likely to churn in the next two months than users with estimates greater than or equal to zero. 
 
-To test this hypothesis, I'll gather all of those users (there are 778 of them) and monitor their churn rates over the next 60 days. I will compare these to the churn rates of the rest of the users, which will act as a control group.
+To test this hypothesis, I'll gather all of those users (there are 717 of them) and monitor their churn rates over the next 60 days. I will compare these to the churn rates of the rest of the users, which will act as a control group.
 
 ```{r}
 slopes %>%
@@ -275,7 +278,7 @@ Now let's assign users to experiment groups, based on their slope estimates.
 ```{r}
 # get user and subscription attributes
 user_facts <- users %>%
-  select(user_id, id:tax_percent) %>%
+  select(user_id, charge_id:interval) %>%
   unique()
 
 # join user facts to slopes
