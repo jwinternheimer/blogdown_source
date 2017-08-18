@@ -1,0 +1,73 @@
+---
+date: 2017-08-16T14:43:01-04:00
+subtitle: ""
+type: "post"
+tags: []
+title: "Diversity of Buffer Applicants"
+---
+
+
+
+<p>Much has been said about diversity in the tech industry recently. Unfortunately, discriminatory beliefs are still held by people in companies that influence how we collectively perceive the world.</p>
+<p>We’re committed to inclusivity at Buffer. We have an inclusivity officer who is also the Director of the People team, and we try to measure and share all of the data we have around diversity. Our <a href="http://diversity.buffer.com/">diversity dashboard</a> is one example of this. Our <a href="https://open.buffer.com/equal-pay/">equal pay</a> report is another.</p>
+<p>I’m sure that we fall short in many ways - we can always do better. Our team is made up of mostly white men, age 25-34.</p>
+<div class="figure">
+<img src="http://i.imgur.com/ne4pyBY.png" />
+
+</div>
+<p>We’re actively trying to build a more diverse team through our hiring practices. We try to remove as much bias from the interview process as possible, which means we try to be “blind” to factors such as gender, sex, race, and age, to the extent that we can.</p>
+<p>We do, however, give applicants the opportunity to fill out an optional survey that let’s us collect data on our applicants’ demographics. It’s important to note that we cannot tie any survey responses to any individual application.</p>
+<p>Let’s analyze the survey responses to get a better understanding of our applicant pool, and how it has changed over time.</p>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>The survey responses are recorded in a private Google Sheet. We can use Jenny Bryan’s excellent <code>[google sheets R package](https://github.com/jennybc/googlesheets)</code> to gather the responses and load them into our R session.</p>
+<pre class="r"><code># get the applicants google sheet
+div &lt;- gs_title(&quot;Diversity dashboard&quot;)
+
+# download sheet
+df &lt;- gs_read(ss = div, ws = &quot;Sheet1&quot;)</code></pre>
+<p>Great. We have a data frame of over 5000 applicants! Let’s do a bit of clean up to get the data ready for analysis. We’ll change the column names, set the dates as date objects, and consolidate some categorical responses.</p>
+<pre class="r"><code># change column names
+colnames(df) &lt;- safe_names(colnames(df))
+
+# set dates
+early_dates &lt;- as.Date(df$date, format = &quot;%m/%d/%Y&quot;)
+later_dates &lt;- as.Date(df$date, format = &quot;%Y-%m-%d&quot;)
+
+# replace NAs
+early_dates[is.na(early_dates)] &lt;- later_dates[!is.na(later_dates)]
+
+# set dates in df
+df$date &lt;- early_dates
+
+# set month
+df$month &lt;- format(df$date, &quot;%Y-%m&quot;)
+df$month &lt;- as.Date(paste0(df$month, &#39;-01&#39;))
+
+# set genders
+df &lt;- df %&gt;%
+  mutate(gender = ifelse(gender != &quot;Man&quot; &amp; gender != &quot;Woman&quot;, &quot;Other&quot;, gender))
+
+# consolidate ethnicities
+df$ethnicity &lt;- gsub(&quot;White/Caucasian&quot;, &quot;White&quot;, df$ethnicity)
+df$ethnicity &lt;- gsub(&quot;European&quot;, &quot;White&quot;, df$ethnicity)
+df$ethnicity &lt;- gsub(&quot;Caucasian&quot;, &quot;White&quot;, df$ethnicity)
+df$ethnicity &lt;- gsub(&quot;Black/African descent&quot;, &quot;Black/African&quot;, df$ethnicity)
+df$ethnicity &lt;- gsub(&quot;Hispanic/Latino&quot;, &quot;Hispanic/Latinx&quot;, df$ethnicity)
+df$ethnicity &lt;- gsub(&quot;Mixed Race&quot;, &quot;Multiracial&quot;, df$ethnicity)
+df$ethnicity &lt;- gsub(&quot;Biracial&quot;, &quot;Multiracial&quot;, df$ethnicity)
+
+# define most frequent ethnicity responses
+ethnicities &lt;- c(&#39;White&#39;, &#39;Black/African&#39;, &#39;Hispanic/Latinx&#39;, &#39;Multiracial&#39;, &#39;Indian&#39;, 
+                 &#39;Prefer Not to Answer&#39;, &#39;West Asian/Middle Eastern&#39;, &#39;Southeast Asian&#39;, 
+                 &#39;Chinese&#39;)
+
+# set low quantities to &#39;other&#39;
+df &lt;- df %&gt;% mutate(ethnicity = ifelse(ethnicity %in% ethnicities, ethnicity, &#39;Other&#39;))</code></pre>
+<p>Now we’re ready!</p>
+</div>
+<div id="exploratory-analysis" class="section level2">
+<h2>Exploratory analysis</h2>
+<p>We saw earlier that the Buffer team is mostly white, male, and between 25 and 34 years old. Let’s compare this to our applicant pool.</p>
+<p><img src="/blog/diversity_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+</div>
