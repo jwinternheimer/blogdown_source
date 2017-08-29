@@ -1,0 +1,108 @@
+---
+date: 2017-08-09T10:25:04-04:00
+subtitle: ""
+tags: []
+title: "Predicting Churn with General Linear Models: Part 2"
+---
+
+In [part 1](https://jwinternheimer.github.io/blog/churn-prediction/) of this analysis, we identified Buffer for Business customers with quickly decreasing rates of usage. We assigned users to either the `control` group or `treatment` group. Let's take a look at each group and compare the churn rates of each.
+
+```{r include = FALSE}
+library(buffer); library(dplyr); library(ggplot2)
+
+# connect to redshift
+con <- redshift_connect()
+```
+
+## Data collection and tidying
+We saved the users in the `control` and `treatment` groups as R data objects earlier, so let's load them quickly.
+
+We will also save the lists of user IDs to use in the SQL query below.
+
+```{r}
+# load groups
+control <- readRDS('control.rds')
+treatment <- readRDS('treatment.rds')
+
+# merge into a single data frame
+all_users <- rbind(control, treatment)
+
+# get user IDs for each group
+control_ids <- paste(shQuote(control$user_id), collapse = ',')
+treatment_ids <- paste(shQuote(treatment$user_id), collapse = ',')
+
+# remove double quotes
+treatment_ids <- as.factor(noquote(treatment_ids))
+control_ids <- as.factor(noquote(control_ids))
+```
+
+Here are the queries to get the plans of each user in each experiment group.
+
+```{sql connection = con, output.var = treatment_plans}
+select
+  user_id
+  , billing_plan
+from users
+where user_id in (?treatment_ids)
+```
+
+```{sql connection = con, output.var = control_plans}
+select
+  user_id
+  , billing_plan
+from users
+where user_id in (?control_ids)
+```
+
+Now, we merge the two datasets into one.
+
+```{r}
+# indicate group
+control_plans$group <- 'control'
+treatment_plans$group <- 'treatment'
+
+# merge two data frames
+all_plans <- rbind(control_plans, treatment_plans)
+
+# join in user subscription data
+all_plans <- all_plans %>%
+  left_join(all_users, by = 'user_id')
+
+# get all user_ids
+all_ids <- as.factor(noquote(paste(shQuote(all_plans$user_id), collapse = ',')))
+```
+
+Now we're ready to calculate churn rates.
+
+## Comparing churn rates
+If a user's billing plan is `individual`, or if the user deleted his or her account, then we can consider him or her as churned.
+
+We'll use `dplyr` to create a new column, `churned`, and group by it to count the number of users that churned in each experiment group.
+
+```{r message = FALSE, warning = FALSE}
+# group by plan
+all_plans %>%
+  filter(as.Date(current_period_end, '%Y-%m-%d') != '2017-08-16') %>%
+  mutate(churned = (billing_plan == 'individual' | is.na(billing_plan))) %>%
+  group_by(group, churned) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users))
+```
+
+```{r}
+all_plans %>% 
+  filter(as.Date(current_period_end, '%Y-%m-%d') != '2017-08-16') %>%
+  mutate(period_end_date = as.Date(current_period_end, format = '%Y-%m-%d'),
+         churned = (billing_plan == 'individual' | is.na(billing_plan))) %>%
+  group_by(period_end_date, group, churned) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users))
+```
+
+```{r warning = FALSE, message = FALSE}
+all_plans %>% 
+  filter(as.Date(current_period_end, '%Y-%m-%d') == '2017-08-17' & group == 'treatment') %>%
+  select(user_id:group, cancel_at_period_end, plan_id, interval)
+```
+
+
