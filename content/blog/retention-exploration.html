@@ -1,0 +1,90 @@
+---
+date: 2017-08-29T10:45:16-04:00
+subtitle: ""
+type: "post"
+tags: []
+title: "Exploring Retention at Buffer"
+---
+
+
+
+<p>Tech companies are often asked about their retention curves. Growth hacking and marketing techniques can provide new users, but product/market fit and retention loops will keep them using your product.</p>
+<p>I realized that I don’t have a solid grasp of Buffer’s retention curve, so I thought I’d make a small post out of the exploration.</p>
+<p>Picking the right metrics to use to calculate retention can be a tricky thing. It should be a leading indicator of revenue and repeat behavior. It shouldn’t be a vanity metric like app downloads. For Buffer, the major retention metric we’ll use is <em>scheduling a post</em>.</p>
+<p>Next we’ll need to choose the right <em>period</em> for each cohort of users. For Buffer, a weekly or monthly period would make sense. For simplicity’s sake, we’ll begin with a <em>monthly</em> period.</p>
+<p>Once we make our overall retention curve, we can segment it by different user characteristics.</p>
+<p>Let’s begin gathering the data we need.</p>
+<div id="data-collection" class="section level2">
+<h2>Data collection</h2>
+<p>For each user that has scheduled an update, we’ll want to collect all of the months in which the user scheduled at least one update. We will also need the user’s signup date.</p>
+<pre class="sql"><code>select
+  u.user_id
+  , date_trunc(&#39;month&#39;, u.created_at) as join_month
+  , date_trunc(&#39;month&#39;, up.created_at) as month
+  , count(distinct up.id) as updates
+from users as u
+left join profiles as p
+  on u.user_id = p.user_id
+left join dbt.updates as up
+  on u.user_id = up.user_id
+where up.was_sent_with_buffer = TRUE
+  and u.created_at &gt;= &#39;2016-01-01&#39;
+  and u.created_at &lt;= up.created_at
+group by 1, 2, 3</code></pre>
+<p>We now have almost 3 million rows of data to work with.</p>
+</div>
+<div id="data-tidying" class="section level2">
+<h2>Data tidying</h2>
+<p>We need to specify the first month that a user shared an update, and then we need to specify which month (1st, 2nd, etc.) each update month represents for each user.</p>
+<pre class="r"><code># specify first update month
+first_month &lt;- users %&gt;%
+  group_by(user_id) %&gt;%
+  summarise(first_update_month = min(month))
+
+# join first month into original data frame
+users &lt;- users %&gt;%
+  inner_join(first_month, by = &#39;user_id&#39;)
+
+# remove unneeded dataframe
+rm(first_month)</code></pre>
+<p>Now let’s calculate the differences in months.</p>
+<pre class="r"><code># function to calculate difference in months
+elapsed_months &lt;- function(end_date, start_date) {
+  
+    end &lt;- as.POSIXlt(end_date)
+    start &lt;- as.POSIXlt(start_date)
+    12 * (end$year - start$year) + (end$mon - start$mon)
+    
+}
+
+# calculate differences in months
+users &lt;- users %&gt;%
+  mutate(month_num = elapsed_months(month, first_update_month) + 1)</code></pre>
+</div>
+<div id="building-the-retention-curve" class="section level2">
+<h2>Building the retention curve</h2>
+<p>For each month number, we want to see the percentage of users <em>that could have scheduled an update</em> that did schedule an update. Let’s start with users that scheduled their first update in January of 2016.</p>
+<pre class="r"><code># filter users
+jan_users &lt;- users %&gt;% filter(first_update_month == &#39;2016-01-01&#39;)
+
+# build retention curve
+jan_users %&gt;% 
+  group_by(month_num) %&gt;%
+  summarise(users = n_distinct(user_id)) %&gt;%
+  mutate(percent = users / max(users)) %&gt;%
+  ggplot(aes(x = month_num, y = percent)) +
+  geom_point() +
+  geom_line() +
+  scale_x_continuous(breaks = seq(0, 18, 3)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2)) +
+  labs(x = &quot;Month&quot;, y = NULL, title = &quot;Retention Curve for Users (Jan 2016)&quot;) +
+  theme_minimal()</code></pre>
+<p><img src="/blog/retention-exploration_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>Great! Now, let’s try to build the overall retention curve. The challenge is that we want to make sure we’re only taking the percentage of users that <em>could have sent an update</em> that did. We’ll therefore only look at users that have been around for 12 months.</p>
+<p><img src="/blog/retention-exploration_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>The graph above shows us the percentage of users that scheduled an update with Buffer on each month after scheduling their first update. Approximately 46% of users schedule an update in the month following the month in which they scheduled their first update. Around 32% of users scheduled an update in month 3, around 21% of users scheduled an update in month 6, and around 15% of users scheduled an update in month 12. This seems pretty good!</p>
+<p>This data was taken with one big sample. We can also look at how the monthly retention rates have changed over time.</p>
+<p><img src="/blog/retention-exploration_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>This is interesting! Overall, it looks like retention has been declining since the beginning of 2016. Retention rates for months 2, 3, 6, and 12 have all declined since 2016. I won’t speculate on the cause of these trends here, but it is something to address!</p>
+<p>Thanks for reading. Please let me know of any questions about the methodology, graphs, or anything!</p>
+</div>
