@@ -24,7 +24,7 @@ For each user that has scheduled an update, we'll want to collect all of the mon
 
 ```{r include = FALSE}
 # load libraries
-library(dplyr); library(buffer); library(ggplot2); library(tidyr)
+library(dplyr); library(buffer); library(ggplot2); library(tidyr); library(zoo)
 
 # connect to Redshift
 # con <- redshift_connect()
@@ -151,4 +151,30 @@ users %>%
 
 This is interesting! Overall, it looks like retention has been declining since the beginning of 2016. Retention rates for months 2, 3, 6, and 12 have all declined since 2016. I won't speculate on the cause of these trends here, but it is something to address! 
 
-Thanks for reading. Please let me know of any questions about the methodology, graphs, or anything!
+We can also attemt to create a plot similar to the one in [this Y Combinator blog post](https://blog.ycombinator.com/growth-guide2017/).
+
+![](https://blog.ycombinator.com/wp-content/uploads/2017/07/Cohort_retention.png)
+
+```{r echo = FALSE}
+# extract year and quarter
+users <- users %>%
+  mutate(quarter = as.yearqtr(first_update_month))
+  
+# build retention curves over time
+users %>% 
+  group_by(quarter, month_num) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / max(users),
+         exclude = (row_number() == n() | row_number() == n() - 1)) %>%
+  filter(exclude == FALSE) %>%
+  ggplot(aes(x = month_num, y = percent, color = as.factor(quarter))) +
+  geom_point() +
+  geom_line() +
+  scale_x_continuous(breaks = seq(0, 18, 3)) +
+  labs(x = " Month", y = NULL, title = "User Retention", color = "Join Quarter") +
+  theme_minimal()
+```
+
+This graph also indicates that retention is trending in the wrong direction! We would hope for the more recent cohorts to have retention curves that are _higher_ than previous cohorts' retention curves.
+
+That's all for now. Thanks for reading. Please let me know of any questions about the methodology, graphs, or anything!
