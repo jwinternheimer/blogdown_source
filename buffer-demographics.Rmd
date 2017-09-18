@@ -122,3 +122,27 @@ demo %>%
   scale_y_continuous(limits = c(0, 0.2))
 ```
 
+```{r}
+# read data 
+values <- read.csv('~/Downloads/values.csv', header = T)
+
+# plot most popular
+values %>%
+  filter(value_text != '' & !(is.na(value_text))) %>%
+  count(value_text) %>%
+  mutate(value_text = as.factor(reorder(value_text, n))) %>%
+  ggplot(aes(x = value_text, y = n, fill = value_text)) +
+  geom_col() +
+  geom_text(aes(label = n), hjust = 2, color = 'white', size = 5) +
+  guides(fill = FALSE) +
+  scale_y_discrete(expand = c(-0.5, 5.5)) +
+  coord_flip() +
+  theme_minimal() +
+  theme(text = element_text(size = 15)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  labs(x = NULL, y = NULL, title = NULL)  + 
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+```
+

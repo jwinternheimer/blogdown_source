@@ -1,0 +1,610 @@
+---
+date: 2017-09-14T14:43:32-04:00
+subtitle: ""
+type: "post"
+tags: []
+title: "Predicting trial conversions with an activation metric"
+---
+
+You've likely heard of [activation rates](https://effinamazing.com/blog/everything-need-know-activation-metrics/) before, especially if you've worked in a tech company. Facebook famously learned that users that connected with a certain number of friends were significantly more likely to be retained, so they encouraged users to connect with more friends when they signed up. 
+
+Causality in that relationship is questionable, but finding a testable hypothesis based on an observed relationship can be a big step forward for companies, especially those with the type of volume that Facebook had. 
+
+At Buffer, we have defined an activation metric that is related to the probability that a new user will be retained for a certain number of months. In this analysis, we will try to define an activation metric for [Buffer for Business trials](https://buffer.com/business).
+
+Defining an activation metric would allow us to experiment more rapidly, as the amount of time it takes to "activate" is inherently shorter than the length of a trial. Experiments that increase the activation rate of trialists should increase the conversion rate of the trial, if we have a good activation metric.
+
+### Data collection
+We'll begin by analyzing small number of features. 
+
+ - `days_since_signup`: The number of days between a user's signup date and trial start date.
+ - `plan_before_trial`: The plan a user was on when he or she started the trial.
+ - `team_members`: The number of team members that the user had.
+ - `updates`: The number of updates scheduled _in the first week of the trial_.
+ - `profiles`: The number of profiles the user had _in the first week of the trial_.
+ - `days_active`: The number of days in which the user took any action _in the first week of the trial_.
+ 
+We only look at data from the first week of the trial so that we can make predictions about the trial's end result before it is completed.
+
+We'll avoid having to use a massive SQL query by using the data that has been collected in [this handy look](https://looker.buffer.com/looks/4034). We can use the `get_look()` function from the `buffer` package to pull the data into R.
+
+```{r include = FALSE}
+library(buffer); library(dplyr); library(ggplot2); library(randomForest); library(rpart)
+```
+
+```{r eval = FALSE}
+# get data from look
+trials <- get_look(4034)
+```
+
+We have around 28K trials to train our models on. Let's do a bit of cleaning to get the data ready for analysis.
+
+### Data cleaning
+First let's rename the columns.
+
+```{r eval = FALSE}
+# rename columns
+colnames(trials) <- c('user_id', 'plan_before_trial', 'join_date', 'trial_start', 'trial_end', 
+                      'converted', 'team_members', 'updates', 'profiles', 'days_active')
+```
+
+Now we need to make sure that the columns in our data frame are of the correct type.
+
+```{r eval = FALSE}
+# create function to set date as date object
+set_date <- function(column) {
+  column <- as.Date(column, format = '%Y-%m-%d')
+}
+
+# apply function to date columns
+trials[3:5] <- lapply(trials[3:5], set_date)
+```
+
+Now let's replace NA values with 0.
+
+```{r eval = FALSE}
+# replace NA with 0
+trials[is.na(trials)] <- 0
+```
+
+Ok, now we need to take a look at the `plan_before_trial` column. What are the values of this column?
+
+```{r eval = FALSE}
+# list frequencies of plan_before_trial values
+table(trials$plan_before_trial)
+```
+
+We can simplify these values.
+
+```{r eval = FALSE}
+# list plan categories
+awesome <- c('awesome', 'pro-monthly', 'pro-annual')
+individual <- c(NULL, 'individual', '')
+
+# set plan_before_trial as character type
+trials$plan_before_trial <- as.character(trials$plan_before_trial)
+
+# assign new values to plan_before_trial
+trials <- trials %>%
+  mutate(previous_plan = ifelse(plan_before_trial %in% awesome, 'awesome',
+                                     ifelse(plan_before_trial %in% individual, 'individual', 'business')))
+
+# set plans as factors
+trials$previous_plan <- as.factor(trials$previous_plan)
+
+# remove unneeded column
+trials$plan_before_trial <- NULL
+```
+
+Cool! We're just about ready to go. Let's create a new variable `days_to_trial` that counts the number of days that elapsed between the users joining Buffer and starting a trial.
+
+```{r eval = FALSE}
+# create days_to_trial column
+trials <- trials %>%
+  mutate(days_to_trial = as.numeric(trial_start - join_date))
+```
+
+Alright! We are ready for some exploratory analysis! Let's first save our dataset here. :) 
+
+```{r}
+# save dataset
+# saveRDS(trials, 'trial_activation.rds')
+
+# load data
+trials <- readRDS('trial_activation.rds')
+```
+
+### Exploratory data analysis
+We have several features to analyze in this dataset. It might be useful to visualize how they are related to one another, if at all. But first, let's just take a look and see how many of our 28K trials converted.
+
+```{r}
+# see how many trials converted
+trials %>%
+  group_by(converted) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users))
+```
+
+Alright, around 20% of trials converted. That's more than I thought! Now let's plot our features and see how they are related.
+
+```{r}
+# define features
+features <- trials %>%
+  select(team_members, updates, profiles, days_active, days_to_trial, previous_plan)
+
+# plot the relationship
+plot(features)
+```
+
+It's difficult to glean much from this visualization. Let's zoom in on a couple features that I suspect might be related. First, let's see if `profiles` and `updates` might be related. We'll take the log of `updates` to scale it down a bit.
+
+```{r}
+# plot profiles and updates
+trials %>%
+  filter(profiles <= 50) %>%
+  ggplot(aes(x = profiles, y = log(updates))) +
+  geom_point(position = 'jitter', alpha = 0.2) +
+  stat_smooth(method = 'loess')
+```
+
+We can see that there is indeed a positive relationship that is stronger at lower profile counts. Let's look at the relationship between `updates` and `team_members` now.
+
+```{r}
+library(ggridges)
+
+# plot team members and updates
+ggplot(filter(trials, team_members <= 5), aes(x = log(updates), y = as.factor(team_members))) +
+  geom_density_ridges(rel_min_height = 0.01, scale = 2) +
+  theme_ridges() +
+  labs(x = "Log Updates", y = "Team Members")
+```
+
+Cool! We can see that the distribution of the log of updates shifts to the right as the number of team members increases. 
+
+Alright, what do the distributions of updates look like for users that converted their trials?
+
+```{r}
+# plot distributions of updates
+ggplot(trials, aes(x = log(updates), y = converted, fill = converted)) +
+  geom_density_ridges(rel_min_height = 0.01, scale = 2) +
+  theme_ridges() +
+  guides(fill=FALSE) +
+  labs(x = "Log Updates", y = "Converted")
+```
+
+And what about profiles?
+
+```{r warning = FALSE, message = FALSE}
+# plot distributions of profiles
+trials %>%
+  ggplot(aes(x = converted, y = profiles)) +
+  geom_boxplot() +
+  scale_y_continuous(limits = c(0, 20))
+```
+
+We can see that users that converted tended to have a higher number of profiles associated with their accounts. Alright, now let's move forwards towards predictive modeling.
+
+### Choosing and evaluating models
+This is a classification task, so we'll want to think of measures like precision and recall. We'll evaluate single-variable models, logistic regression, decision trees, and random forest models in this analysis. How should we evaluate these models?
+
+The most common measure of quality is _accuracy_, which is the number of items categorized correctly divided by the total number of items. This might not be appropriate for this case though, because our classes (converted and unconverted are unbalanced). 
+
+We then move on to _precision_ and _recall_. Precision represents how often a positive classification turns out to be correct. Recall is the fraction of things that are in the class that are detected by the classifier. There are combinations of the two, like _F1_ as well.
+
+For our classifier, we will calculate the area under the ROC curve (which represents every possible tradeoff between sensitivity and specificity). We'll call this area under the curve _AUC_.
+
+### Single variable models. 
+Let's see how well each individual feature does in predicting trial conversions. First, we'll need to split our data into training and testing sets.
+
+```{r}
+# set seed for reproducibility
+set.seed(1235)
+
+# give a random number to each observation
+trials$rgroup <- runif(nrow(trials))
+
+# remove cases in which team members > 10
+trials <- trials %>% filter(team_members <= 10)
+
+# split observations into training and testing sets
+training <- subset(trials, rgroup <= 0.8)
+testing <- subset(trials, rgroup > 0.8)
+```
+
+Now let's identify categorical and numeric features. Then, we'll build a function to make single-variable models.
+
+```{r}
+# list variables we don't want to include
+to_exclude <- c('user_id', 'join_date', 'trial_start', 'trial_end', 'converted','rgroup')
+
+# get a list of the features
+vars <- setdiff(colnames(trials), to_exclude)
+
+# odentify the categorical variables
+catVars <- vars[sapply(trials[, vars], class) %in% c('factor', 'character')]
+
+# identify the numeric variables
+numVars <- vars[sapply(trials[, vars], class) %in% c('numeric', 'integer')]
+```
+
+Define the outcome.
+
+```{r}
+# specify the outcome
+outcome <- 'converted'
+
+# specify which outcome is considered positive
+pos <- "Yes"
+```
+
+Cool, now let's define a function to make preditions based on the levels of the categorical variables.
+
+```{r}
+# given a vector of training outcomes (outcomes), a categorical training variable (variable), 
+# and a prediction variable (predictor), use outcomes and variable to build a single-variable model 
+# and then apply the model to predictor to get new predictions.
+
+make_prediction <- function(outcomes, variable, predictor) {
+  
+  # Find how often the outcome is positive during training
+  positive_rate <- sum(outcomes == pos) / length(outcomes)
+  
+  # We need this to handle NA values
+  na_table <- table(as.factor(outcomes[is.na(variable)]))
+  
+  # Get stats on how often outcome is positive for NA values in training
+  positive_rate_na <- (na_table/sum(na_table))[pos]
+  
+  var_table <- table(as.factor(outcomes), variable)
+  
+  # Get stats on how often outcome is positive, conditioned on levels of the variable
+  pPosWv <- (var_table[pos,] + 1.0e-3 * positive_rate)/(colSums(var_table) + 1.0e-3)
+  
+  # Make predictions by looking up levels of the predictor
+  pred <- pPosWv[predictor]
+  
+  # Add in predictions for levels of the predictor that weren’t known during training
+  pred[is.na(pred)] <- positive_rate
+  
+  pred
+
+} 
+```
+
+Apply this function.
+
+```{r}
+for(v in catVars) {
+  
+  # Make prediction for each categorical variable
+  pi <- paste('pred_', v, sep='')
+  
+  # Do it for the training and testing datasets
+  training[, pi] <- make_prediction(training[, outcome], training[, v], training[, v]) 
+  testing[, pi] <- make_prediction(testing[, outcome], testing[, v], testing[, v]) 
+}
+```
+
+Once we have the predictions, we can find the categorical variables that have a good AUC both on the training data and on the calibration data not used during training. These are likely the more useful variables.
+
+```{r warning = F, message = F}
+library('ROCR')
+
+# Define a function to calculate AUC
+calcAUC <- function(predictions, outcomes) {
+  
+  perf <- performance(prediction(predictions, outcomes == pos), 'auc') 
+  as.numeric(perf@y.values)
+  
+}
+```
+
+Now, for each of the categorical variables, we calculate the AUC based on the predictions that we made earlier.
+
+```{r}
+for(v in catVars) {
+  
+  pi <- paste('pred_', v, sep = '')
+  
+  aucTrain <- calcAUC(training[, pi], training[, outcome])
+  aucTest <- calcAUC(testing[, pi], testing[, outcome])
+
+  print(sprintf("%s, trainingAUC: %4.3f testingnAUC: %4.3f", pi, aucTrain, aucTest))
+
+}
+```
+
+Let's use the same technique for numeric variables by converting them into categorical variables.
+
+```{r}
+# Define a function that makes predictions
+make_prediction_numeric <- function(outcome, variable, predictor) {
+  
+  # Make the cuts to bin the data
+  cuts <- unique(as.numeric(quantile(variable, probs = seq(0, 1, 0.1), na.rm = T)))
+  varC <- cut(variable, cuts)
+  appC <- cut(predictor, cuts)
+  
+  # Now apply the categorical make prediction function
+  make_prediction(outcome, varC, appC)
+}
+```
+
+Now let's apply this function to the numeric variables.
+
+```{r warning = F, message = F}
+# Loop through the columns and apply the formula
+for(v in numVars) {
+  
+  # Name the prediction column
+  pi <- paste('pred_', v, sep = '')
+  
+  # Make the predictions
+  training[, pi] <- make_prediction_numeric(training[, outcome], training[, v], training[, v])
+  testing[, pi] <- make_prediction_numeric(training[, outcome], training[, v], testing[, v])
+  
+  # Score the predictions
+  aucTrain <- calcAUC(training[, pi], training[, outcome])
+  aucTest <- calcAUC(testing[, pi], testing[, outcome])
+
+  print(sprintf("%s, trainingAUC: %4.3f testingnAUC: %4.3f", pi, aucTrain, aucTest))
+    
+}
+```
+
+Alright. It looks like team members, updates, profiles, and days active could be decent predictors of a trial conversion. We'll try to beat an AUC of 0.65 with our models.
+
+### General linear model
+Let's fit a general linear model to our data and see how well if performs.
+
+```{r}
+# fit glm
+glm_mod <- glm(converted ~ team_members + updates + profiles + days_active + previous_plan + days_to_trial,
+               data = training, family = 'binomial')
+```
+
+Let's view a summary of the model.
+
+```{r}
+# view summary of model
+summary(glm_mod)
+```
+
+Interestingly, `team_members`, `profiles`, `days_active`, `previous_plan`, and `days_to_trial` all have significant effects on the probability that a trial converts, but `updates` does not! 
+
+The point estimate for `updates` is even negative! This doesn't quite seem right, so let's take a closer look at this feature. I suspect that there is some overfitting going on.
+
+```{r}
+# plot distribution of updates in training dataset
+ggplot(training, aes(x = updates)) +
+  stat_ecdf()
+```
+
+Ok, no wonder! There are people with over 70K updates scheduled in the first week! Let's zoom in a bit.
+
+```{r}
+# plot distribution of updates
+ggplot(training, aes(x = updates)) +
+  stat_ecdf() +
+  coord_cartesian(xlim = c(0, 400)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2))
+```
+
+Around 97% of users in the training set scheduled 400 or less updates in the first week of the trial. Let's filter users that scheduled more out of the dataset and revisit them later.
+
+```{r}
+# remove people that scheduled 400 or more updates from the training dataset
+training <- training %>%
+  filter(updates < 400)
+```
+
+Ok, now let's refit the general linear model.
+
+```{r}
+# fit glm
+glm_mod <- glm(converted ~ team_members + updates + profiles + days_active + previous_plan + days_to_trial,
+               data = training, family = 'binomial')
+
+# summarize model
+summary(glm_mod)
+```
+
+That's more like it! All features have statistically significant effects. Let's make predictions on the `testing` set now. :) 
+
+```{r warning = FALSE, message = FALSE}
+# make predictions on testing set
+testing$probs <- predict(glm_mod, newdata = testing, type = c("response"))
+
+# create prediction object
+pred <- prediction(testing$probs, testing$converted)
+
+# plot ROC curve
+roc = performance(pred, measure = "tpr", x.measure = "fpr")
+plot(roc) + abline(a = 0, b = 1, lty = 2)
+```
+
+Sweet! Now let's plot the accuracy of the model.
+
+```{r}
+# plot accuracy
+acc.perf = performance(pred, measure = "acc")
+plot(acc.perf)
+```
+
+Now let's calculate the AUC for the model.
+
+```{r}
+# calculate AUC
+performance(pred, measure = "auc")
+```
+
+Alright, 0.75 isn't too shabby!
+
+### Using decision trees
+Building decision trees involves proposing many possible _data cuts_ and then choosing the best cuts based on simultaneous competing criteria of predictive power, cross-validation strength, and interaction with other chosen cuts.
+
+One of the advantages of using a package for decision tree work is not having to worry about the construction details.
+
+```{r}
+library(rpart); library(rpart.plot)
+
+# fit decision tree model
+tree_mod <- rpart(converted ~ team_members + updates + profiles + days_active + previous_plan + days_to_trial,
+               data = training, method = 'class', control = rpart.control(cp = 0.001, minsplit = 1000,
+                                                              minbucket = 1000, maxdepth = 5))
+
+# plot model
+rpart.plot(tree_mod)
+```
+
+Ok, so `team_members` is the moset important feature, by far, to this model. Let's see how well it does at predicting conversions in the `testing` set.
+
+```{r}
+# make predictions on testing set
+testing$tree_preds <- predict(tree_mod, newdata = testing)[,2]
+
+# create prediction object for tree model
+pred <- prediction(testing$tree_preds, testing$converted)
+
+# plot ROC curve
+roc = performance(pred, measure = "tpr", x.measure = "fpr")
+plot(roc) + abline(a = 0, b = 1, lty = 2)
+```
+
+This model did not perform well. Let's calculate the AUC just for kicks and giggles.
+
+```{r}
+# calculate AUC
+performance(pred, measure = "auc")
+```
+
+It's 0.65, about as good as single variable model, which is what it is essentially!
+
+### Random forests
+Random Forest is a versatile machine learning method capable of performing both regression and classification tasks. It also undertakes dimensional reduction methods, treats missing values, outlier values and other essential steps of data exploration, and does a fairly good job. It is a type of ensemble learning method, where a group of weak models combine to form a powerful model.
+
+Let's try it out.
+
+```{r}
+library(randomForest)
+
+# fit random forest model
+rf_mod <- randomForest(converted ~ team_members + updates + profiles + days_active + previous_plan + 
+                         days_to_trial, data = training, importance = T, ntree = 500)
+```
+
+Let's see which variables were important to the model.
+
+```{r}
+# plot variable importance
+varImpPlot(rf_mod)
+```
+
+Those team members! Let's make our predictions on the testing set.
+
+```{r}
+# make predictions based on random forest model
+rf_preds <- predict(rf_mod, newdata = testing, type = 'prob')
+
+# create prediction object for rf model
+rf_pred <- prediction(rf_preds[, 2], testing$converted)
+
+# plot ROC curve
+roc = performance(rf_pred, measure = "tpr", x.measure = "fpr")
+plot(roc) + abline(a = 0, b = 1, lty = 2)
+```
+
+Now let's calculate AUC.
+
+```{r}
+# calculate AUC
+performance(rf_pred, measure = "auc")
+```
+
+Alright, we have 0.76. This is much better than the single-variable models and the decision tree model, but about the same as the general linear model!
+
+### An activation metric
+So we've built these models. How does that help us find an activation metric? We know that these features (team members, updates, etc) are important, so let's do some more exploratory analysis to see how we could fit them into an activation metric.
+
+We'll start with `team_members`. That seems to be the most important variable in each of our models. Let's plot team members against the proportion of trials that converted.
+
+```{r}
+# plot team members and conversion rate
+trials %>%
+  group_by(team_members, converted) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users)) %>%
+  filter(converted == 'Yes') %>%
+  ggplot(aes(x = as.factor(team_members), y = percent)) + 
+  geom_bar(stat = 'identity') +
+  labs(x = "Number of Team Members", y = NULL, title = "Conversion Rate by Team Size")
+```
+
+As we can see, the conversion rate increases quite a bit for trialists with the addition of each team member, _up to 5_. The biggest jump comes from 0 to 1 team member, so we can use **_at least one team member_** as part of the activation metric.
+
+The number of updates scheduled in the first week was also an important feature, so let's make the same plot for that. We'll need to bucket the number of updates.
+
+```{r}
+# make the cuts to bin the updates data
+cuts <- unique(as.numeric(quantile(trials$updates, probs = seq(0, 1, 0.1), na.rm = T)))
+
+# set updates bins
+trials$update_bin <- cut(trials$updates, cuts)
+
+# plot updates bin and conversion rate
+trials %>%
+  filter(!(is.na(trials$update_bin))) %>%
+  group_by(update_bin, converted) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users)) %>%
+  filter(converted == 'Yes') %>%
+  ggplot(aes(x = as.factor(update_bin), y = percent)) + 
+  geom_bar(stat = 'identity') +
+  labs(x = "Number of Updates", y = NULL, title = "Conversion Rate by Updates Shared")
+```
+
+There looks to be a near-linear relationship between update bin and conversion rate. We can use **_10 or more updates_** as a good cutoff for our activation metric. 
+
+Now let's look at profiles.
+
+```{r}
+# make the cuts to bin the profiles data
+cuts <- unique(as.numeric(quantile(trials$profiles, probs = seq(0, 1, 0.1), na.rm = T)))
+
+# set profile bins
+trials$profile_bin <- cut(trials$profiles, cuts)
+
+trials %>%
+  filter(!(is.na(trials$profile_bin))) %>%
+  group_by(profile_bin, converted) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users)) %>%
+  filter(converted == 'Yes') %>%
+  ggplot(aes(x = as.factor(profile_bin), y = percent)) + 
+  geom_bar(stat = 'identity') +
+  labs(x = "Number of Profiles", y = NULL, title = "Conversion Rate by Profiles")
+```
+
+There seems to be a large _relative_ jump at the 4 profile mark. Not good science, but let's go with it!
+
+Now let's look at days active.
+
+```{r}
+# plot conversion rate and days active
+trials %>%
+  filter(!(is.na(trials$days_active))) %>%
+  group_by(days_active, converted) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users)) %>%
+  filter(converted == 'Yes') %>%
+  ggplot(aes(x = as.factor(days_active), y = percent)) + 
+  geom_bar(stat = 'identity') +
+  labs(x = "Number of Days Active", y = NULL, title = "Conversion Rate by Days Active")
+```
+
+Cool.
+
+### Conclusions
+Add conclusions and assumptions here. 
+
+Activation metric can be 1 team member, 10 updates, and 4 profiles through the first week. 
