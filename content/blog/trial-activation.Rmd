@@ -521,10 +521,10 @@ Now let's calculate AUC.
 performance(rf_pred, measure = "auc")
 ```
 
-Alright, we have 0.76. This is much better than the single-variable models and the decision tree model, but about the same as the general linear model!
+Alright, we have 0.76. This is much better than the single-variable models and the decision tree model, but performed about the same as the general linear model! Now that we've tried a few different approaches, let's get back to the original goal of defining an activation metric for Business trialists.
 
 ### An activation metric
-So we've built these models. How does that help us find an activation metric? We know that these features (team members, updates, etc) are important, so let's do some more exploratory analysis to see how we could fit them into an activation metric.
+We've built these models. How does that help us find an activation metric? We know that our features (team members, updates, etc) are important, so we can do some more exploratory analysis to see how we could fit them into an activation metric.
 
 We'll start with `team_members`. That seems to be the most important variable in each of our models. Let's plot team members against the proportion of trials that converted.
 
@@ -540,9 +540,9 @@ trials %>%
   labs(x = "Number of Team Members", y = NULL, title = "Conversion Rate by Team Size")
 ```
 
-As we can see, the conversion rate increases quite a bit for trialists with the addition of each team member, _up to 5_. The biggest jump comes from 0 to 1 team member, so we can use **_at least one team member_** as part of the activation metric.
+As we can see, the conversion rate increases quite a bit for trialists with the addition of each team member, _up to 5_. The biggest jump comes from 0 to 1 team member, so we can start by using **_at least one team member_** as part of the activation metric.
 
-The number of updates scheduled in the first week was also an important feature, so let's make the same plot for that. We'll need to bucket the number of updates.
+The number of updates scheduled in the first week was also an important feature, so let's make the same plot for that. We'll need to bucket the number of updates to convert the continuous variable into a categorical one.
 
 ```{r}
 # make the cuts to bin the updates data
@@ -563,7 +563,7 @@ trials %>%
   labs(x = "Number of Updates", y = NULL, title = "Conversion Rate by Updates Shared")
 ```
 
-There looks to be a near-linear relationship between update bin and conversion rate. We can use **_10 or more updates_** as a good cutoff for our activation metric. 
+There looks to be a near-linear relationship between update bin and conversion rate. We can use **_10 or more updates_** as a good cutoff for our activation metric, so as to not cut off too many trialists.
 
 Now let's look at profiles.
 
@@ -585,9 +585,9 @@ trials %>%
   labs(x = "Number of Profiles", y = NULL, title = "Conversion Rate by Profiles")
 ```
 
-There seems to be a large _relative_ jump at the 4 profile mark. Not good science, but let's go with it!
+There seems to be a large _relative_ jump at the 4 profile mark. I acknowledge that this is not good science, but let's go with it.
 
-Now let's look at days active.
+Finally we can look at the number of days active in the first week of the trial.
 
 ```{r}
 # plot conversion rate and days active
@@ -602,7 +602,25 @@ trials %>%
   labs(x = "Number of Days Active", y = NULL, title = "Conversion Rate by Days Active")
 ```
 
-Cool.
+Cool. I'm hesitent to include this, but let's see what happens for different activation metric choices. What would happen if we chose the following criteria for an "activation":
+
+ - At least 1 team member.
+ - At least 4 profiles.
+ - At least 10 updates.
+ 
+```{r}
+# define a boolean activation variable
+trials <- trials %>%
+  mutate(activated = (team_members >= 1 & profiles >= 4 & updates >= 10))
+
+# find conversion rate for those activated
+trials %>%
+  group_by(activated, converted) %>%
+  summarise(users = n_distinct(user_id)) %>%
+  mutate(percent = users / sum(users))
+```
+
+Alright. With these criteria, around 8% of trials activated. Around 62% of activated trials converted, compared to only 17% of trials that did not activate.
 
 ### Conclusions
 Add conclusions and assumptions here. 
