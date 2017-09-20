@@ -8,10 +8,10 @@ title: "How much vacation does Buffer take?"
 
 Buffer introduced a [minimum vacation policy](https://open.buffer.com/minimum-vacation/) a year ago, in which we encouraged Americans to take _at least_ 15 days of vacation (excluding holidays), Australians to take at least 17 days, Canadians at least 20 days, and Europeans at least 25 days. 
 
-The fairness of this policy is open to debate, but we can try to measure the effect that it has had on the team over the past year. We use timetastic to schedule time off, and we're lucky enough to have a nice report that shows how much time each team member has taken off.
+In this analysis we'll try to measure the effect that it has had on the team over the past year. We use timetastic to schedule time off, and we're lucky enough to have a nice report that shows how much time each team member has taken off.
 
 ### Data collection
-We'll read the data in from a CSV that we exported from the site.
+We'll read the data in from a CSV that we exported from timetastic.
 
 ```{r include = FALSE}
 library(dplyr); library(buffer); library(ggplot2)
@@ -22,7 +22,7 @@ library(dplyr); library(buffer); library(ggplot2)
 days <- read.csv('~/Downloads/vacation.csv', header = T)
 ```
 
-Let's clean up the column names and set the dates as date types. 
+Now let's clean up the column names and set the dates as date types. 
 
 ```{r include = FALSE}
 # change column names
@@ -37,7 +37,7 @@ set_date <- function(column) {
 days[c(3, 9:11)] <- lapply(days[c(3, 9:11)], set_date)
 ```
 
-Great! Now let's get the data in the format we want.
+Great! Now let's do a bit of tidying to make the analysis easier.
 
 ### Data tidying
 We only want to look at time taken off in the past year, so let's filter out dates that don't apply. We also want to filter to only look at _vacation_ days taken off. We also want to exclude people that are no longer on the team.
@@ -67,6 +67,8 @@ by_user <- vacation %>%
   summarise(total_working_days = sum(working))
 ```
 
+We'll "bin" the number of vacation days, so that it becomes a categorical variable instead of a numeric one. This will make plotting a little easier, as we'll be able to see the number of team members that took, say, 1 to 5 vacation days in the past year.
+
 ```{r}
 # make bins for total days
 cuts <- c(-Inf, seq(0, 50, 5))
@@ -75,6 +77,8 @@ cuts <- c(-Inf, seq(0, 50, 5))
 by_user <- by_user %>%
   mutate(days_off = cut(total_working_days, cuts))
 ```
+
+Now we're ready to make some fun plots.
 
 ## Exploratory analysis
 So how much time has the team taken off in the past year?
@@ -90,9 +94,11 @@ by_user %>%
   labs(x = "Days Off", y = "Number of Team Members", title = "How much time off did people take?")
 ```
 
-That's interesting! Over the past year, many team members have only taken 10-15 vacation days. A quarter of the team has taken 12 or less days, half of the team has taken 16 or less days, and a quarter of the team has taken 24 or more days. We have one team member who has taken over 40 days of vacation!
+The average number of vacation days taken by Buffer employees in the past year is 18.2, and the median is 16.5. Around a quarter of the team has taken 12 or less vacation days, and another quarter has taken over 24 days off.
 
-How does this look for people that live in different regions? 
+The plot above shows that many team members have only taken 10-15 vacation days. We have one team member who has only taken 2 days off over the past year and one who has taken over 40 days!
+
+How does this look for people that live in different regions? Let's calculate the _median_ number of vacation days taken and visualize it.
 
 ```{r include = FALSE}
 # give users regions
@@ -103,16 +109,39 @@ by_user$region <- c('us', 'asia', 'asia', 'us', 'us', 'europe', 'europe', 'us', 
             'us', 'europe', 'us', 'ca', 'us', 'us', 'europe', 'us', 'europe', 'europe',
             'us', 'europe', 'au', 'europe', 'us', 'asia', 'au', 'europe', 'europe', 'us',
             'ca', 'us', 'asia', 'europe', 'us', 'us', 'us', 'us', 'europe', 'ca', 'us')
-```
 
-```{r echo = FALSE, warning = FALSE, message = FALSE}
-library(ggridges)
-
+# sub region names
 by_user$region <- gsub('us', "US", by_user$region)
 by_user$region <- gsub('au', "Australia", by_user$region)
 by_user$region <- gsub('europe', "Europe", by_user$region)
 by_user$region <- gsub('asia', 'Asia', by_user$region)
 by_user$region <- gsub('ca', "Canada", by_user$region)
+```
+
+```{r echo = FALSE}
+by_user %>%
+  group_by(region) %>%
+  summarise(median = median(total_working_days)) %>%
+  mutate(region = reorder(region, median)) %>%
+  ggplot(aes(x = region, y = median, fill = region)) +
+  geom_bar(stat = 'identity') +
+  geom_text(aes(label = round(median, 0)), hjust = 1.5, color = 'white', size = 4) +
+  theme_minimal() +
+  coord_flip() +
+  labs(x = NULL, y = NULL, title = 'Median Vacation Days') +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  theme(text = element_text(size = 15)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  guides(fill = FALSE) 
+```
+
+This is interesting! We haven't yet taken into account the _variance_ in the number of vacation days taken, so let's visualize _the distribution of vacation days_ taken from team members that live in each region.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+library(ggridges)
 
 # plot team members and updates
 ggplot(filter(by_user, region != 'Australia'), aes(x = total_working_days, 
@@ -125,7 +154,7 @@ ggplot(filter(by_user, region != 'Australia'), aes(x = total_working_days,
   labs(x = "Days Off", y = NULL)
 ```
 
-Overall, it looks like people are following the recommendations of the policy! The center of the distribution of days off for Americans is between 10 and 20, as is the center of the distribution of days off for Europeans. 
+Overall, it looks like people are following the recommendations of the policy. The center of the distribution of days off for Americans is between 10 and 20, as is the center of the distribution of days off for Europeans. 
 
 The distribution is far wider for Europeans, which suggests that there are people that have taken very few days off (one person has only taken 2) and people that have taken many days off (one has taken 44.5). 
 
@@ -133,12 +162,44 @@ Canadians seem to really know how to take time off. Their distribution is more u
 
 Team members in Asia represent a smaller sample, but their distribution is centered around 11 days. Here are the means and medians for each group.
 
-```{r}
-by_user %>%
-  group_by(region) %>%
-  summarise(average = mean(total_working_days), median = median(total_working_days),
-            standard_deviation = sd(total_working_days)) %>%
-  arrange(average)
+How do the distributions look for people on different teams within Buffer?
+
+```{r include = FALSE}
+# read data with teams
+by_user <- read.csv('~/Downloads/vaca.csv', header = T)
 ```
 
-There we go!
+```{r echo = FALSE}
+by_user %>%
+  group_by(team) %>%
+  summarise(median = median(total_working_days)) %>%
+  mutate(team = reorder(team, median)) %>%
+  ggplot(aes(x = team, y = median, fill = team)) +
+  geom_bar(stat = 'identity') +
+  geom_text(aes(label = median), hjust = 1.5, color = 'white', size = 4) +
+  theme_minimal() +
+  coord_flip() +
+  labs(x = NULL, y = NULL, title = 'Median Vacation Days') +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  theme(text = element_text(size = 15)) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  guides(fill = FALSE) 
+```
+
+This is pretty cool. The executive team is leading the way! In my opinion, this serves as a great example to us underlings to take time to rest and recharge. What do the distributions look like?
+
+```{r echo = FALSE}
+ggplot(filter(by_user, team != "Finance"), aes(x = total_working_days, y = team, fill = team)) +
+  geom_density_ridges(rel_min_height = 0.001, scale = 1.5, color = 'white') +
+  theme_ridges() +
+  scale_fill_cyclical(values = c("#2A7FFF", "#5599FF")) +
+  scale_x_continuous(limits = c(0, 50), breaks = seq(0, 50, 10)) +
+  labs(x = "Days Off", y = NULL)
+```
+
+We can see that there is a lot of variance across and within teams. It's really interesting to see the bimodal distributions for the Peopple team and the Execs. Some people within those teams seem to be more willing to take time off for vacation than others. 
+
+That was fun. Let me know if you have any thoughts or questions!
