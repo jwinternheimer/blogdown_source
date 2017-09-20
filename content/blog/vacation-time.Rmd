@@ -24,7 +24,7 @@ days <- read.csv('~/Downloads/vacation.csv', header = T)
 
 Now let's clean up the column names and set the dates as date types. 
 
-```{r include = FALSE}
+```{r}
 # change column names
 colnames(days) <- safe_names(colnames(days))
 
@@ -67,7 +67,7 @@ by_user <- vacation %>%
   summarise(total_working_days = sum(working))
 ```
 
-We'll "bin" the number of vacation days, so that it becomes a categorical variable instead of a numeric one. This will make plotting a little easier, as we'll be able to see the number of team members that took, say, 1 to 5 vacation days in the past year.
+We'll "bin" the number of vacation days, so that it becomes a categorical variable instead of a numeric one. This will make plotting a little easier, as we'll be able to see the number of team members that took, say, 1 to 5 days in the past year.
 
 ```{r}
 # make bins for total days
@@ -78,9 +78,9 @@ by_user <- by_user %>%
   mutate(days_off = cut(total_working_days, cuts))
 ```
 
-Now we're ready to make some fun plots.
+Alright, let's make some fun plots.
 
-## Exploratory analysis
+### Exploratory analysis
 So how much time has the team taken off in the past year?
 
 ```{r echo = FALSE}
@@ -98,7 +98,7 @@ The average number of vacation days taken by Buffer employees in the past year i
 
 The plot above shows that many team members have only taken 10-15 vacation days. We have one team member who has only taken 2 days off over the past year and one who has taken over 40 days!
 
-How does this look for people that live in different regions? Let's calculate the _median_ number of vacation days taken and visualize it.
+How does this look for people that live in different regions? Let's look at the _median_ number of vacation days taken by team members in each region.
 
 ```{r include = FALSE}
 # give users regions
@@ -138,7 +138,7 @@ by_user %>%
   guides(fill = FALSE) 
 ```
 
-This is interesting! We haven't yet taken into account the _variance_ in the number of vacation days taken, so let's visualize _the distribution of vacation days_ taken from team members that live in each region.
+This is interesting! We haven't yet taken into account the variance in the number of vacation days taken, so let's visualize the distribution of vacation days taken from team members that live in each region.
 
 ```{r echo = FALSE, warning = FALSE, message = FALSE}
 library(ggridges)
@@ -158,9 +158,9 @@ Overall, it looks like people are following the recommendations of the policy. T
 
 The distribution is far wider for Europeans, which suggests that there are people that have taken very few days off (one person has only taken 2) and people that have taken many days off (one has taken 44.5). 
 
-Canadians seem to really know how to take time off. Their distribution is more uniformly distributed and is closer to the 30-40 day range. 
+Canadians seem to know how to relax. Their distribution is more uniformly distributed and is closer to the 30-40 day range. 
 
-Team members in Asia represent a smaller sample, but their distribution is centered around 11 days. Here are the means and medians for each group.
+Team members in Asia represent a smaller sample, but their distribution is centered around 11 days.
 
 How do the distributions look for people on different teams within Buffer?
 
@@ -191,7 +191,7 @@ by_user %>%
 
 This is pretty cool. The executive team is leading the way! In my opinion, this serves as a great example to us underlings to take time to rest and recharge. What do the distributions look like?
 
-```{r echo = FALSE}
+```{r echo = FALSE, warning = FALSE, message = FALSE}
 ggplot(filter(by_user, team != "Finance"), aes(x = total_working_days, y = team, fill = team)) +
   geom_density_ridges(rel_min_height = 0.001, scale = 1.5, color = 'white') +
   theme_ridges() +
@@ -202,4 +202,5 @@ ggplot(filter(by_user, team != "Finance"), aes(x = total_working_days, y = team,
 
 We can see that there is a lot of variance across and within teams. It's really interesting to see the bimodal distributions for the Peopple team and the Execs. Some people within those teams seem to be more willing to take time off for vacation than others. 
 
-That was fun. Let me know if you have any thoughts or questions!
+### That's it for now
+That was fun! Let me know if you have any thoughts or questions!

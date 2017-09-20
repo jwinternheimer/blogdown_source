@@ -16,6 +16,16 @@ title: "How much vacation does Buffer take?"
 <pre class="r"><code># read CSV
 days &lt;- read.csv(&#39;~/Downloads/vacation.csv&#39;, header = T)</code></pre>
 <p>Now let’s clean up the column names and set the dates as date types.</p>
+<pre class="r"><code># change column names
+colnames(days) &lt;- safe_names(colnames(days))
+
+# create function to set date as date object
+set_date &lt;- function(column) {
+  column &lt;- as.Date(column, format = &#39;%Y-%m-%d&#39;)
+}
+
+# apply function to date columns
+days[c(3, 9:11)] &lt;- lapply(days[c(3, 9:11)], set_date)</code></pre>
 <p>Great! Now let’s do a bit of tidying to make the analysis easier.</p>
 </div>
 <div id="data-tidying" class="section level3">
@@ -29,34 +39,36 @@ vacation &lt;- days %&gt;%
 by_user &lt;- vacation %&gt;%
   group_by(user) %&gt;%
   summarise(total_working_days = sum(working))</code></pre>
-<p>We’ll “bin” the number of vacation days, so that it becomes a categorical variable instead of a numeric one. This will make plotting a little easier, as we’ll be able to see the number of team members that took, say, 1 to 5 vacation days in the past year.</p>
+<p>We’ll “bin” the number of vacation days, so that it becomes a categorical variable instead of a numeric one. This will make plotting a little easier, as we’ll be able to see the number of team members that took, say, 1 to 5 days in the past year.</p>
 <pre class="r"><code># make bins for total days
 cuts &lt;- c(-Inf, seq(0, 50, 5))
 
 # bin the days
 by_user &lt;- by_user %&gt;%
   mutate(days_off = cut(total_working_days, cuts))</code></pre>
-<p>Now we’re ready to make some fun plots.</p>
+<p>Alright, let’s make some fun plots.</p>
 </div>
-<div id="exploratory-analysis" class="section level2">
-<h2>Exploratory analysis</h2>
+<div id="exploratory-analysis" class="section level3">
+<h3>Exploratory analysis</h3>
 <p>So how much time has the team taken off in the past year?</p>
 <p><img src="/blog/vacation-time_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
 <p>The average number of vacation days taken by Buffer employees in the past year is 18.2, and the median is 16.5. Around a quarter of the team has taken 12 or less vacation days, and another quarter has taken over 24 days off.</p>
 <p>The plot above shows that many team members have only taken 10-15 vacation days. We have one team member who has only taken 2 days off over the past year and one who has taken over 40 days!</p>
-<p>How does this look for people that live in different regions? Let’s calculate the <em>median</em> number of vacation days taken and visualize it.</p>
+<p>How does this look for people that live in different regions? Let’s look at the <em>median</em> number of vacation days taken by team members in each region.</p>
 <p><img src="/blog/vacation-time_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
-<p>This is interesting! We haven’t yet taken into account the <em>variance</em> in the number of vacation days taken, so let’s visualize <em>the distribution of vacation days</em> taken from team members that live in each region.</p>
+<p>This is interesting! We haven’t yet taken into account the variance in the number of vacation days taken, so let’s visualize the distribution of vacation days taken from team members that live in each region.</p>
 <p><img src="/blog/vacation-time_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
 <p>Overall, it looks like people are following the recommendations of the policy. The center of the distribution of days off for Americans is between 10 and 20, as is the center of the distribution of days off for Europeans.</p>
 <p>The distribution is far wider for Europeans, which suggests that there are people that have taken very few days off (one person has only taken 2) and people that have taken many days off (one has taken 44.5).</p>
-<p>Canadians seem to really know how to take time off. Their distribution is more uniformly distributed and is closer to the 30-40 day range.</p>
-<p>Team members in Asia represent a smaller sample, but their distribution is centered around 11 days. Here are the means and medians for each group.</p>
+<p>Canadians seem to know how to relax. Their distribution is more uniformly distributed and is closer to the 30-40 day range.</p>
+<p>Team members in Asia represent a smaller sample, but their distribution is centered around 11 days.</p>
 <p>How do the distributions look for people on different teams within Buffer?</p>
 <p><img src="/blog/vacation-time_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
 <p>This is pretty cool. The executive team is leading the way! In my opinion, this serves as a great example to us underlings to take time to rest and recharge. What do the distributions look like?</p>
-<pre><code>## Picking joint bandwidth of 3.57</code></pre>
 <p><img src="/blog/vacation-time_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
 <p>We can see that there is a lot of variance across and within teams. It’s really interesting to see the bimodal distributions for the Peopple team and the Execs. Some people within those teams seem to be more willing to take time off for vacation than others.</p>
-<p>That was fun. Let me know if you have any thoughts or questions!</p>
+</div>
+<div id="thats-it-for-now" class="section level3">
+<h3>That’s it for now</h3>
+<p>That was fun! Let me know if you have any thoughts or questions!</p>
 </div>
