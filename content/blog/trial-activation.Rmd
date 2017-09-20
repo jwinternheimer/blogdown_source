@@ -37,7 +37,7 @@ library(buffer); library(dplyr); library(ggplot2); library(randomForest); librar
 trials <- get_look(4034)
 ```
 
-We have around 28K trials to train our models on. Let's do a bit of cleaning to get the data ready for analysis.
+We have around 25K trials to train our models on. Let's do a bit of cleaning to get the data ready for analysis.
 
 ### Data cleaning
 First let's rename the columns.
@@ -45,7 +45,7 @@ First let's rename the columns.
 ```{r eval = FALSE}
 # rename columns
 colnames(trials) <- c('user_id', 'plan_before_trial', 'join_date', 'trial_start', 'trial_end', 
-                      'converted', 'team_members', 'updates', 'profiles', 'days_active')
+                      'converted', 'team_members', 'subscription_plan', 'updates', 'profiles', 'days_active')
 ```
 
 Now we need to make sure that the columns in our data frame are of the correct type.
@@ -106,12 +106,15 @@ trials <- trials %>%
 
 Alright! We are ready for some exploratory analysis! Let's first save our dataset here. :) 
 
-```{r}
+```{r include = FALSE}
 # save dataset
 # saveRDS(trials, 'trial_activation.rds')
 
 # load data
 trials <- readRDS('trial_activation.rds')
+
+# remove subscription_plan column
+trials$subscription_plan <- NULL
 ```
 
 ### Exploratory data analysis
@@ -125,7 +128,7 @@ trials %>%
   mutate(percent = users / sum(users))
 ```
 
-Alright, around 20% of trials converted. That's more than I thought! Now let's plot our features and see how they are related.
+Alright, around 10% of trials converted. That's more than I thought! Now let's plot our features and see how they are related.
 
 ```{r}
 # define features
@@ -149,7 +152,7 @@ trials %>%
 
 We can see that there is indeed a positive relationship that is stronger at lower profile counts. Let's look at the relationship between `updates` and `team_members` now.
 
-```{r}
+```{r warning = FALSE, message = FALSE}
 library(ggridges)
 
 # plot team members and updates
@@ -161,9 +164,9 @@ ggplot(filter(trials, team_members <= 5), aes(x = log(updates), y = as.factor(te
 
 Cool! We can see that the distribution of the log of updates shifts to the right as the number of team members increases. 
 
-Alright, what do the distributions of updates look like for users that converted their trials?
+What do the distributions of updates look like for users that converted their trials?
 
-```{r}
+```{r warning = FALSE, message = FALSE}
 # plot distributions of updates
 ggplot(trials, aes(x = log(updates), y = converted, fill = converted)) +
   geom_density_ridges(rel_min_height = 0.01, scale = 2) +
@@ -179,7 +182,9 @@ And what about profiles?
 trials %>%
   ggplot(aes(x = converted, y = profiles)) +
   geom_boxplot() +
-  scale_y_continuous(limits = c(0, 20))
+  scale_y_continuous(limits = c(0, 20)) +
+  theme_minimal() +
+  labs(x = "Converted", y = NULL, title = "Number of Profiles")
 ```
 
 We can see that users that converted tended to have a higher number of profiles associated with their accounts. Alright, now let's move forwards towards predictive modeling.
@@ -215,7 +220,7 @@ Now let's identify categorical and numeric features. Then, we'll build a functio
 
 ```{r}
 # list variables we don't want to include
-to_exclude <- c('user_id', 'join_date', 'trial_start', 'trial_end', 'converted','rgroup')
+to_exclude <- c('user_id', 'join_date', 'trial_start', 'trial_end', 'converted', 'rgroup')
 
 # get a list of the features
 vars <- setdiff(colnames(trials), to_exclude)
@@ -288,9 +293,9 @@ for(v in catVars) {
 Once we have the predictions, we can find the categorical variables that have a good AUC both on the training data and on the calibration data not used during training. These are likely the more useful variables.
 
 ```{r warning = F, message = F}
-library('ROCR')
+library(ROCR)
 
-# Define a function to calculate AUC
+# define a function to calculate AUC
 calcAUC <- function(predictions, outcomes) {
   
   perf <- performance(prediction(predictions, outcomes == pos), 'auc') 
@@ -314,18 +319,18 @@ for(v in catVars) {
 }
 ```
 
-Let's use the same technique for numeric variables by converting them into categorical variables.
+The AUC for the single-variable model using `previous_plan` as the predictor is around 0.60, which isn't that much better than random guessing. Let's use the same technique for numeric variables by converting them into categorical variables.
 
 ```{r}
-# Define a function that makes predictions
+# define a function that makes predictions
 make_prediction_numeric <- function(outcome, variable, predictor) {
   
-  # Make the cuts to bin the data
+  # make the cuts to bin the data
   cuts <- unique(as.numeric(quantile(variable, probs = seq(0, 1, 0.1), na.rm = T)))
   varC <- cut(variable, cuts)
   appC <- cut(predictor, cuts)
   
-  # Now apply the categorical make prediction function
+  # now apply the categorical make prediction function
   make_prediction(outcome, varC, appC)
 }
 ```
@@ -333,17 +338,17 @@ make_prediction_numeric <- function(outcome, variable, predictor) {
 Now let's apply this function to the numeric variables.
 
 ```{r warning = F, message = F}
-# Loop through the columns and apply the formula
+# loop through the columns and apply the formula
 for(v in numVars) {
   
-  # Name the prediction column
+  # name the prediction column
   pi <- paste('pred_', v, sep = '')
   
-  # Make the predictions
+  # make the predictions
   training[, pi] <- make_prediction_numeric(training[, outcome], training[, v], training[, v])
   testing[, pi] <- make_prediction_numeric(training[, outcome], training[, v], testing[, v])
   
-  # Score the predictions
+  # score the predictions
   aucTrain <- calcAUC(training[, pi], training[, outcome])
   aucTest <- calcAUC(testing[, pi], testing[, outcome])
 
@@ -352,7 +357,7 @@ for(v in numVars) {
 }
 ```
 
-Alright. It looks like team members, updates, profiles, and days active could be decent predictors of a trial conversion. We'll try to beat an AUC of 0.65 with our models.
+Alright. It looks like team members, updates, profiles, and days active could be good predictors of a trial conversion. We'll try to beat an AUC of 0.65 with our models.
 
 ### General linear model
 Let's fit a general linear model to our data and see how well if performs.
@@ -390,12 +395,12 @@ ggplot(training, aes(x = updates)) +
   scale_y_continuous(breaks = seq(0, 1, 0.2))
 ```
 
-Around 97% of users in the training set scheduled 400 or less updates in the first week of the trial. Let's filter users that scheduled more out of the dataset and revisit them later.
+Around 95% of users in the training set scheduled 200 or less updates in the first week of the trial. Let's filter users that scheduled more out of the dataset and revisit them later.
 
 ```{r}
-# remove people that scheduled 400 or more updates from the training dataset
+# remove people that scheduled 200 or more updates from the training dataset
 training <- training %>%
-  filter(updates < 400)
+  filter(updates < 200)
 ```
 
 Ok, now let's refit the general linear model.
@@ -438,7 +443,7 @@ Now let's calculate the AUC for the model.
 performance(pred, measure = "auc")
 ```
 
-Alright, 0.75 isn't too shabby!
+Alright, 0.86 is pretty dang good! 
 
 ### Using decision trees
 Building decision trees involves proposing many possible _data cuts_ and then choosing the best cuts based on simultaneous competing criteria of predictive power, cross-validation strength, and interaction with other chosen cuts.
@@ -457,9 +462,9 @@ tree_mod <- rpart(converted ~ team_members + updates + profiles + days_active + 
 rpart.plot(tree_mod)
 ```
 
-Ok, so `team_members` is the moset important feature, by far, to this model. Let's see how well it does at predicting conversions in the `testing` set.
+Ok, so this tree model has one node. If a user has 2 or more team members, around 62% convert, compared to only 7% of those with 1 or less. Let's see how well it does at predicting conversions in the `testing` set. I suspect not very well.
 
-```{r}
+```{r message = FALSE, warning = FALSE}
 # make predictions on testing set
 testing$tree_preds <- predict(tree_mod, newdata = testing)[,2]
 
@@ -478,7 +483,7 @@ This model did not perform well. Let's calculate the AUC just for kicks and gigg
 performance(pred, measure = "auc")
 ```
 
-It's 0.65, about as good as single variable model, which is what it is essentially!
+It's 0.69, about as good as single variable model, which is what it is!
 
 ### Random forests
 Random Forest is a versatile machine learning method capable of performing both regression and classification tasks. It also undertakes dimensional reduction methods, treats missing values, outlier values and other essential steps of data exploration, and does a fairly good job. It is a type of ensemble learning method, where a group of weak models combine to form a powerful model.
@@ -500,9 +505,13 @@ Let's see which variables were important to the model.
 varImpPlot(rf_mod)
 ```
 
+Since the random forest algorithm uses a large number of bootstrap samples, each data point x has a corresponding set of out-of-bag samples: those samples that don’t contain the point x. The out-of-bag samples can be used is a way similar to N-fold cross validation, to estimate the accuracy of each tree in the ensemble.
+
+To estimate the imporance of a variable, the variable’s values are randomly permuted in the out-of-bag samples, and the corresponding decrease in each tree’s accuracy is estimated. If the average decrease over all the trees is large, then the variable is considered important -- its value makes a big difference in predicting the outcome. If the average decrease is small, then the variable doesn’t make much difference to the outcome. The algorithm also measures the decrease in node purity that occurs from splitting on a permuted variable (how this variable affects the quality of the tree). 
+
 Those team members! Let's make our predictions on the testing set.
 
-```{r}
+```{r warning = FALSE, message = FALSE}
 # make predictions based on random forest model
 rf_preds <- predict(rf_mod, newdata = testing, type = 'prob')
 
@@ -521,7 +530,7 @@ Now let's calculate AUC.
 performance(rf_pred, measure = "auc")
 ```
 
-Alright, we have 0.76. This is much better than the single-variable models and the decision tree model, but performed about the same as the general linear model! Now that we've tried a few different approaches, let's get back to the original goal of defining an activation metric for Business trialists.
+Alright, we have 0.86. This is much better than the single-variable models and the decision tree model, but performed about the same as the general linear model! Now that we've tried a few different approaches, let's get back to the original goal of defining an activation metric for Business trialists.
 
 ### An activation metric
 We've built these models. How does that help us find an activation metric? We know that our features (team members, updates, etc) are important, so we can do some more exploratory analysis to see how we could fit them into an activation metric.
@@ -540,7 +549,7 @@ trials %>%
   labs(x = "Number of Team Members", y = NULL, title = "Conversion Rate by Team Size")
 ```
 
-As we can see, the conversion rate increases quite a bit for trialists with the addition of each team member, _up to 5_. The biggest jump comes from 0 to 1 team member, so we can start by using **_at least one team member_** as part of the activation metric.
+As we can see, the conversion rate increases quite a bit for trialists with the addition of each team member, _up to 5_. The biggest jump comes from 0 to 2 team members, so we can start by using **_at least one team member_** as part of the activation metric.
 
 The number of updates scheduled in the first week was also an important feature, so let's make the same plot for that. We'll need to bucket the number of updates to convert the continuous variable into a categorical one.
 
@@ -620,7 +629,7 @@ trials %>%
   mutate(percent = users / sum(users))
 ```
 
-Alright. With these criteria, around 8% of trials activated. Around 62% of activated trials converted, compared to only 17% of trials that did not activate.
+Alright. With these criteria, around 6% of trials activated. Around 59% of activated trials converted, compared to only 8% of trials that did not activate.
 
 ### Conclusions
 Add conclusions and assumptions here. 
