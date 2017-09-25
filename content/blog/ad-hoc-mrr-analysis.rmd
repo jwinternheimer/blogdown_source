@@ -1,9 +1,9 @@
 ---
-date: 2017-09-22T18:07:59-04:00
+date: 2017-09-25T10:45:16-04:00
 subtitle: ""
 type: "post"
 tags: []
-title: "An ad-hoc MRR analysis"
+title: "An ad hoc analysis of MRR"
 ---
 
 In this analysis we will look at how MRR has grown in 2017. We will look at the overall growth of MRR as measured by our daily MRR calculation, and we will look at the MRR components (new, churn, etc.) as measured by the [Stripe MRR breakdown script](https://github.com/bufferapp/buffer-analysis/blob/master/deliverables/mrr-breakdown.md).
@@ -25,17 +25,20 @@ library(dplyr); library(tidyr); library(ggplot2); library(lubridate)
 # read csv
 mrr <- read.csv('~/Downloads/weekly_mrr.csv', header = T)
 
-# remove first column
-mrr$X <- NULL
-
 # rename columns 
-colnames(mrr) <- c('week', 'mrr', 'change')
+colnames(mrr) <- c('week', 'mrr')
 
 # set date as date
 mrr$week <- as.Date(mrr$week, format = '%Y-%m-%d')
 
+# calculate mrr change
+mrr <- mrr %>% mutate(change = mrr - lead(mrr, 1))
+
 # remove first two rows
 mrr <- mrr[-(1:2),]
+
+# filter to only include mrr from 2016 on
+mrr <- mrr %>% filter(week >= '2016-01-01')
 ```
 
 ```{r echo = FALSE, warning = FALSE, message = FALSE}
@@ -53,8 +56,7 @@ The data suggests that 2016 was a bit more volatile than 2017 has been so far. W
 Let's look at the MRR breakdown data.
 
 ### Revenue gained and lost
-Now we can look at the _weekly_ MRR amounts that were gained and lost in the past 8 months. These amounts were calculated with the [new Stripe MRR breakdown script](https://github.com/bufferapp/buffer-analysis/blob/master/deliverables/mrr-breakdown.md). 
-
+Now we can look at the _weekly_ MRR amounts that were gained and lost since January 2016. These amounts were calculated with the [new Stripe MRR breakdown script](https://github.com/bufferapp/buffer-analysis/blob/master/deliverables/mrr-breakdown.md). 
 
 ```{r include = FALSE}
 mrr_events <- readRDS('~/Documents/buffer-analysis/deliverables/mrr_events.rds')
@@ -97,7 +99,7 @@ by_week %>%
   labs(x = NULL, y = NULL, title = "Net MRR Movements", color = "Type")
 ```
 
-We can flip the sign on net lost to get a better comparison.
+We can flip the sign on net MRR lost to more easily compare the lines.
 
 ```{r echo = FALSE}
 by_week %>%
@@ -112,7 +114,23 @@ by_week %>%
   labs(x = NULL, y = NULL, title = "Net MRR Movements", color = "Type")
 ```
 
-We can see in this graph that `net_lost` has increased over time, but so has `net_gained`. There is always a gap between the two, but it isn't easy to tell if the gap is growing, shrinking, or staying about the same. We can find out by looking at the _overall_ net MRR amount, which is equal to new + upgrade - churn - downgrade MRR.
+We can see in this graph that `net_lost` has increased over time, but so has `net_gained`. There is always a gap between the two, but it isn't easy to tell if the gap is growing, shrinking, or staying about the same. 
+
+```{r echo = FALSE}
+by_week %>%
+  filter(week != '2017-06-25') %>%
+  mutate(net_type = ifelse(event_type == 'new' | event_type == 'upgrade', 'net_gained', 'net_lost'),
+         mrr = ifelse(event_type == 'churn' | event_type == 'downgrade', mrr * -1, mrr)) %>%
+  group_by(week, net_type) %>%
+  summarise(mrr = sum(mrr)) %>%
+  ggplot(aes(x = week, y = mrr, color = net_type)) +
+  geom_line() + 
+  stat_smooth(method = 'loess') +
+  theme_minimal() +
+  labs(x = NULL, y = NULL, title = "Net MRR Movements", color = "Type")
+```
+
+We can find out by looking at the _overall_ net MRR amount, which is equal to new + upgrade - churn - downgrade MRR.
 
 ```{r echo = FALSE}
 by_week %>%
@@ -122,11 +140,11 @@ by_week %>%
   ggplot(aes(x = week, y = mrr)) +
   geom_line() + 
   theme_minimal() +
-  scale_y_continuous(limits = c(0, 12000)) +
+ # scale_y_continuous(limits = c(0, 15000)) +
   labs(x = NULL, y = NULL, title = "Weekly Net MRR")
 ```
 
-There is a lot of variance, so we can try to fit a smoother over this data to view longer term trands. Remember that something could be off with the data from the last week of June.
+At first glance, it does appear that there may be a slight decrease in weekly new MRR in 2017 compared to 2016. There is a lot of variance here, so we can try to fit a smoother over this data to view longer term trands. The big spike and dip in July 2016 was arount the tie we were experimenting with trial lengths.
 
 ```{r echo = FALSE}
 by_week %>%
@@ -135,18 +153,36 @@ by_week %>%
   summarise(mrr = sum(mrr)) %>%
   ggplot(aes(x = week, y = mrr)) +
   geom_line() + 
-  scale_y_continuous(limits = c(0, 12000)) +
+  scale_y_continuous(limits = c(0, 16000)) +
   theme_minimal() +
   stat_smooth(method = 'loess') +
   labs(x = NULL, y = NULL, title = "Net MRR")
 ```
 
-In the past 8 months, the data suggests that there may have been a slight decrease in MRR gained after the end of April, but it doesn't seem like the trend continues to decrease after that. 
+In the past 20 months, the data suggests that there may have been a slight decrease in MRR gained in 2017 compared to 2016. This effect appears after the end of April 2017, but it doesn't seem like the trend continues to decrease after that. 
 
-I suspect that there is a seasonal component that affects this data, but I haven't yet had time to backfill data through 2016 and 2015, so we may have to wait to confirm that.
+This is how net MRR would look if we only looked at data from 2017. 
+
+```{r echo = FALSE}
+by_week %>%
+  filter(week != '2017-06-25' & week >= '2017-01-01') %>%
+  group_by(week) %>%
+  summarise(mrr = sum(mrr)) %>%
+  ggplot(aes(x = week, y = mrr)) +
+  geom_line() + 
+  geom_point() +
+  scale_y_continuous(limits = c(0, 10000)) +
+  theme_minimal() +
+  stat_smooth(method = 'loess') +
+  labs(x = NULL, y = NULL, title = "Net MRR")
+```
+
+It is worth remembering that net MRR is the combination of new, churn, upgrade, and downgrade MRR.
 
 ### Extrapolating a bad scenario
-We can go through the exercise of thinking about the worst-case scenario. In the very first graph of this analysis, in which I show the amount that Stripe MRR has changed each week in the past two years, we can fit a straight line through the data.
+We've seen that there may have been a slight dip in weekly net mrr in 2017. We can go through the exercise of thinking about the worst-case scenario if the trend continues. 
+
+In the very first graph of this analysis, in which I show the amount that Stripe MRR has changed each week in the past two years, we can fit a straight line through the data by fitting a linear regression model.
 
 ```{r echo = FALSE, message = FALSE, warning = FALSE}
 # plot weekly change
@@ -158,30 +194,36 @@ ggplot(mrr, aes(x = week, y = change)) +
   labs(x = NULL, y = NULL, title = "Weekly MRR Growth")
 ```
 
+We can see that this line has a negative slope, which isn't ideal. We can extrapolate it into the future and determine how long it might take for this line, which represents the average weekly growth rate, to reach 0.
+
 ```{r}
 # get linear equation
 lm_mod <- lm(change ~ week, data = mrr)
 summary(lm_mod)
 ```
 
-The formula for this line is `change = beta + (-1.151 * week)`, which means that MRR change _decreases_ by 1-2 dollars each week. It would take thousands of weeks for this straight line to hit 0.
+The formula for this line is `change = beta + (-1.204 * week)`, which means that, on average, MRR change _decreases_ by 1-2 dollars each week. At this rate it would take over one thousand weeks for this line to reach 0.
 
-It's worth noting that the effect of week on MRR change _is not significant_, meaning that there is **not** a significant negative effect on MRR, according to this linear regression model.
+It's worth noting that the effect of week on MRR change _is not significant_, meaning that there is **not** a significant negative effect on MRR, according to this linear regression model. There is a very weak correlation between time and MRR change in this model. 
 
-### A more realistic scenario
-Instead of this approach, we can use the variance in MRR change to simulate how the future could play out in thousands of parrallel universes. We can generate a random MRR growth number that is based on the average MRR growth in the past two years and the variance in that number. We can repeat that proccess thousands of times to give us an idea of how things _could_ play out, and can then take the average to find how things are more likely to turn out.
+### Simulating possible outcomes
+Instead of this approach, we can use the variance in MRR change to simulate how the future could play out in thousands of parrallel universes. We can generate a random MRR growth number that is based on the average MRR growth in the past two years and the variance in that number. We can repeat that proccess hundredds of times to give us an idea of how things _could_ play out under current conditions.
+
+Let's calculate the average amount that MRR grows weekly over the pats couple of years.
 
 ```{r}
 # find mean mrr growth
 mean(mrr$change, na.rm = TRUE)
 ```
 
+We can also calculate the standard deviation.
+
 ```{r}
 # get the standard deviation
 sd(mrr$change, na.rm = TRUE)
 ```
 
-We can now generate random samples from the distribution of MRR change. Here are 10 of such numbers.
+We can now generate random samples from the distribution of MRR change. The assumes that weekly MRR change is normally distributed around 6141 with a standard deviation of 1797. Here are 10 of such numbers.
 
 ```{r}
 # generate random sample of 10 months of mrr growth.
@@ -231,7 +273,7 @@ ggplot() +
   labs(x = NULL, y = NULL, title = "Weekly MRR Change Simulations")
 ```
 
-Each line represents a different simulation based on our historical data. This is what would happen if we plotted the _average_ of all 100 simulations for each week.
+Each line represents a different simulation based on our historical data. This is what it would look like to plot the _average_ of all 100 simulations for each week.
 
 ```{r}
 ggplot() +
@@ -242,7 +284,95 @@ ggplot() +
   labs(x = NULL, y = NULL, title = "Weekly MRR Change Simulations")
 ```
 
-The first plot looked to be trending downwards to me, but the average is linear. 
+The first plot looked to be trending downwards to me, but the average is linear.
+
+### Monthly growth rate
+I understand that the monthly growth rate is the metric that is given the most attention, so we can look at how that has changed over time as well. It might just be good to remember that a month is not quite a standard unit of time, because months have different numbers of days (and weekdays) in them. :) 
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+# read csv
+monthly <- read.csv('~/Downloads/monthly_mrr.csv', header = T, stringsAsFactors = FALSE)
+
+# rename columns 
+colnames(monthly) <- c('month', 'mrr')
+
+# set date as date
+monthly$month <- as.Date(paste0(monthly$month, '-01'), format = '%Y-%m-%d')
+
+# calculate monthly change
+monthly <- monthly %>% mutate(change = mrr - lead(mrr, 1))
+```
+
+```{r echo = FALSE}
+ggplot(monthly, aes(x = month, y = mrr)) +
+  geom_point() + 
+  geom_line() + 
+  theme_minimal() + 
+  labs(x = NULL, y = NULL, title = 'Total Stripe MRR')
+```
+
+```{r echo = FALSE}
+ggplot(filter(monthly, month != min(month)), aes(x = month, y = change)) +
+  geom_bar(stat = 'identity') +
+  theme_minimal() + 
+  labs(x = NULL, y = NULL, title = 'Total Stripe MRR Growth')
+```
+
+These graphs shows a very linear relationship between month and MRR, with little variation. We can fit a linear regression model to get the equation for this line.
+
+```{r}
+# get linear equation
+lm_mod <- lm(mrr ~ month, data = monthly)
+summary(lm_mod)
+```
+
+Now we can get predictions for future months.
+
+```{r echo = FALSE}
+# get a sequence of future dates
+dates <- as.data.frame(seq.Date(from = as.Date('2017-09-01'), as.Date('2020-09-01'), by = 'month'))
+colnames(dates) <- 'month'
+
+# get predictions
+pred <- predict(lm_mod, dates)
+
+# set mrr predictions
+dates$mrr <- pred
+
+ggplot() +
+  geom_line(aes(x = month, y = mrr), data = monthly) + 
+  geom_point(aes(x = month, y = mrr), data = monthly) + 
+  geom_line(aes(x = month, y = mrr), color = 'blue', data = dates) + 
+  geom_point(aes(x = month, y = mrr), color = 'blue', data = dates) + 
+  theme_minimal() + 
+  labs(x = NULL, y = NULL, title = 'Total Stripe MRR')
+```
+
+The blue points are the predictions from the linear model. What would the MRR growth rate look like?
+
+```{r echo = FALSE}
+# bind predictions and historic MRR
+combined <- rbind(select(monthly, -change), dates)
+
+# calculate change and growth rate
+combined  %>%
+  arrange(desc(month)) %>%
+  mutate(change = mrr - lead(mrr, 1),
+         growth_rate = (mrr - lead(mrr, 1)) / lead(mrr, 1)) %>%
+  filter(month >= '2016-01-01') %>%
+  ggplot(aes(x = month, y = growth_rate, color = (month > '2017-08-01'))) +
+  geom_line() +
+  scale_y_continuous(limits = c(0, 0.05)) +
+  theme_minimal() + 
+  labs(x = NULL, y = NULL, title = "Monthly Stripe MRR Growth Rate", color = "Prediction")
+```
+
+We can see that the monthly MRR growth rate would trend downwards, which we'd expect. The predictions assume linear growth, which we have experienced over the long run. There will be some significant variation however, as we can see with the growth rates in red. September 2017, for example, looks set to have a monthly growth rate around 1%, which is much lower than what this model would predict. 
+
+### Conclusions
+Overall, MRR growth appears to be steady but may have a slight downwward trend. This trend is not yet significant, and would take years to reach 0% growth. MRR gained through new signups and updates continues to increase, but so does MRR lost through churn and downgrades. 
+
+[September 2017](https://looker.buffer.com/dashboards/332) looks set to be a month in which we experience lower-than-expected growth, which could slightly alter some of these estimations. I would guess that MRR would revert to the average, linear growth path over the next couple of months, but I can't say that definitively.
 
 
 ```{r include = FALSE}
