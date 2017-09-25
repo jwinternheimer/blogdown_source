@@ -1,0 +1,43 @@
+---
+date: 2017-09-25T12:06:30-04:00
+subtitle: ""
+type: "post"
+tags: []
+title: "How has MRR grown over time?"
+---
+
+
+
+<p>In recent times we’ve seen MRR growth that is <a href="https://jwinternheimer.github.io/blog/ad-hoc-mrr-analysis/">roughly linear</a>. This wasn’t always the case - Buffer has had periods of higher growth and periods of low growth. We weren’t always growing MRR by 25-30K each month.</p>
+<p>In this analysis we’ll try to identify points of inflection at which growth in MRR changed significantly. We’ll use methods in the <code>changepoint</code> package to identify points at which there is a shift in the amount of MRR growth.</p>
+<div id="data-collection" class="section level3">
+<h3>Data collection</h3>
+<p>We’ll use data from <a href="https://looker.buffer.com/x/QMtgaToOxLnV7jBy0YI1zu">this look</a>, which shows <em>Stripe</em> MRR amounts since January 2012.</p>
+<p><img src="/blog/mrr-changepoints_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>This plot has the shape of a hockey stick, with a period of exponential growth around the end of 2013 and more-linear growth since then. It will be useful to plot monthly MRR growth, and how that has changed over time.</p>
+<p><img src="/blog/mrr-changepoints_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>From looking at this graph, we suspect that there are multiple changes in MRR growth that have occurred over Buffer’s lifetime. In the next section we will use the <code>changepoint</code> package to identify if there indeed were significant changes in the <em>average MRR growth</em> of certain time periods, and, if so, where they occurred.</p>
+</div>
+<div id="changepoint-detection" class="section level3">
+<h3>Changepoint detection</h3>
+<p>We can use the <code>changepoint</code> R package to identify shifts in the mean and variance of time series like ours. We will use the <em>binary segmentation</em> algorithm to detect changepoints in our dataset.</p>
+<p>Binary segmentation works by applying single changepoint test statistic to the entire data. If a changepoint is identified, the data is split at the location of the changepoint. The single changepoint procedure is repeated on the two new data sets, before and after the change. If changepoints are identified in either of the new datasets, they are split further. This process continues until no changepoints are found in any parts of the data.</p>
+<p><img src="/blog/mrr-changepoints_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>The algorithm detects 5 changepoints in monthly MRR growth. The changepoints occur at August 2013, December 2013, September 2015, December 2015, and February 2016. I will try to recall significant events that occurred around these dates.</p>
+<ul>
+<li><p>From January 2012 to August 2013, Buffer was growing by increasing amounts each month. This type of growth could be considered exponential.</p></li>
+<li><p>Buffer for Business was launched in December of 2013. This lead to a large upwards shift in monthly MRR growth that lasted until September 2015.</p></li>
+<li><p>In September 2015 we lengthened the Business trial length from 7 to 30 days. This lead to us having a period in which no Business trials were ending and a decrease in MRR growth for the months of September and October.</p></li>
+<li><p>In December 2015, the deferred revenue from users that would have converted 7-day trials started to be collected and MRR recovered.</p></li>
+<li><p>In February and March 2016, we experimented with pricing and doubled the price of Business plans, which lead to a slight increase in monthly MRR growth.</p></li>
+</ul>
+<p>We can visualize these changepoints on the original graph of overall MRR.</p>
+<p><img src="/blog/mrr-changepoints_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+</div>
+<div id="conclusions" class="section level3">
+<h3>Conclusions</h3>
+<p>Growth hasn’t always been linear. Buffer experience exponential growth in the early days, which was augmented by the launch of Buffer for Business in August 2013. From that point until September 2015, MRR growth was roughly linear on average.</p>
+<p>In September 2015, we increased the length of Buffer for Business trials from 7 to 30 days. This had the effect of delaying MRR gained from Business trials by three weeks. We had a period in which no Business trials were ending and a decrease in MRR growth for the months of September and October was the result.</p>
+<p>When the 30-day trials began finishing and converting again, MRR growth recovered to the level it was before the change in trial length.</p>
+<p>In March of 2016, we doubled the price of Business plans, which lead to an upwards shift in monthly MRR growth. From that point on, we have experienced growth that is roughly linear <em>on average</em>.</p>
+</div>

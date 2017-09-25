@@ -212,6 +212,13 @@ Instead of this approach, we can use the variance in MRR change to simulate how 
 Let's calculate the average amount that MRR grows weekly over the pats couple of years.
 
 ```{r}
+ggplot(mrr, aes(x = change)) +
+  geom_histogram(color = 'white', binwidth = 500) +
+  labs(x = "Weekly MRR Growth")
+```
+
+
+```{r}
 # find mean mrr growth
 mean(mrr$change, na.rm = TRUE)
 ```

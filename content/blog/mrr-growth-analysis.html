@@ -70,6 +70,10 @@ summary(lm_mod)</code></pre>
 <h3>Simulating possible outcomes</h3>
 <p>Instead of this approach, we can use the variance in MRR change to simulate how the future could play out in thousands of parrallel universes. We can generate a random MRR growth number that is based on the average MRR growth in the past two years and the variance in that number. We can repeat that proccess hundredds of times to give us an idea of how things <em>could</em> play out under current conditions.</p>
 <p>Let’s calculate the average amount that MRR grows weekly over the pats couple of years.</p>
+<pre class="r"><code>ggplot(mrr, aes(x = change)) +
+  geom_histogram(color = &#39;white&#39;, binwidth = 500) +
+  labs(x = &quot;Weekly MRR Growth&quot;)</code></pre>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
 <pre class="r"><code># find mean mrr growth
 mean(mrr$change, na.rm = TRUE)</code></pre>
 <pre><code>## [1] 6141.64</code></pre>
@@ -80,10 +84,10 @@ sd(mrr$change, na.rm = TRUE)</code></pre>
 <p>We can now generate random samples from the distribution of MRR change. The assumes that weekly MRR change is normally distributed around 6141 with a standard deviation of 1797. Here are 10 of such numbers.</p>
 <pre class="r"><code># generate random sample of 10 months of mrr growth.
 rnorm(10, mean = mean(mrr$change, na.rm = T), sd = sd(mrr$change, na.rm = T))</code></pre>
-<pre><code>##  [1] 3734.115 4287.077 4858.102 6121.995 4720.143 8481.856 7011.816
-##  [8] 6506.066 3390.748 7898.563</code></pre>
+<pre><code>##  [1] 6009.839 5317.865 8378.095 5608.473 5168.732 4211.273 7262.153
+##  [8] 8614.697 5898.895 7850.217</code></pre>
 <p>Now let’s get a sample of 52, simulating MRR growth for the next year, and repeat this 100 times.</p>
-<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-21-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
 <p>Each line represents a different simulation based on our historical data. This is what it would look like to plot the <em>average</em> of all 100 simulations for each week.</p>
 <pre class="r"><code>ggplot() +
   geom_line(aes(x = week, y = samp, color = run), alpha = 0.2, data = runs) +
@@ -91,14 +95,14 @@ rnorm(10, mean = mean(mrr$change, na.rm = T), sd = sd(mrr$change, na.rm = T))</c
   guides(color = FALSE) +
   theme_minimal() +
   labs(x = NULL, y = NULL, title = &quot;Weekly MRR Change Simulations&quot;)</code></pre>
-<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-23-1.png" width="672" /></p>
 <p>The first plot looked to be trending downwards to me, but the average is linear.</p>
 </div>
 <div id="monthly-growth-rate" class="section level3">
 <h3>Monthly growth rate</h3>
 <p>I understand that the monthly growth rate is the metric that is given the most attention, so we can look at how that has changed over time as well. It might just be good to remember that a month is not quite a standard unit of time, because months have different numbers of days (and weekdays) in them. :)</p>
-<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-24-1.png" width="672" /></p>
 <p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-25-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-26-1.png" width="672" /></p>
 <p>These graphs shows a very linear relationship between month and MRR, with little variation. We can fit a linear regression model to get the equation for this line.</p>
 <pre class="r"><code># get linear equation
 lm_mod &lt;- lm(mrr ~ month, data = monthly)
@@ -122,9 +126,9 @@ summary(lm_mod)</code></pre>
 ## Multiple R-squared:  0.9965, Adjusted R-squared:  0.9964 
 ## F-statistic:  6352 on 1 and 22 DF,  p-value: &lt; 2.2e-16</code></pre>
 <p>Now we can get predictions for future months.</p>
-<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-27-1.png" width="672" /></p>
-<p>The blue points are the predictions from the linear model. What would the MRR growth rate look like?</p>
 <p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-28-1.png" width="672" /></p>
+<p>The blue points are the predictions from the linear model. What would the MRR growth rate look like?</p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-29-1.png" width="672" /></p>
 <p>We can see that the monthly MRR growth rate would trend downwards, which we’d expect. The predictions assume linear growth, which we have experienced over the long run. There will be some significant variation however, as we can see with the growth rates in red. September 2017, for example, looks set to have a monthly growth rate around 1%, which is much lower than what this model would predict.</p>
 </div>
 <div id="conclusions" class="section level3">
