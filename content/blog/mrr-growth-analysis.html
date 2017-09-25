@@ -1,5 +1,5 @@
 ---
-date: 2017-09-25T10:45:16-04:00
+date: 2017-09-25T10:50:58-04:00
 subtitle: ""
 type: "post"
 tags: []
@@ -15,34 +15,34 @@ title: "An ad hoc analysis of MRR"
 <div id="net-mrr-by-mrr-calculation" class="section level3">
 <h3>Net MRR by MRR calculation</h3>
 <p>Let’s start by looking at how <em>Stripe</em> MRR has grown each week this year, as measured by the daily MRR calculation.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
 <p>The data suggests that 2016 was a bit more volatile than 2017 has been so far. We experimented with trial length and pricing, which caused some volatility. Overall the amount of MRR growth from Stripe each week seems relatively stable. There may be a slight negative trend over the past several weeks however.</p>
 <p>Let’s look at the MRR breakdown data.</p>
 </div>
 <div id="revenue-gained-and-lost" class="section level3">
 <h3>Revenue gained and lost</h3>
 <p>Now we can look at the <em>weekly</em> MRR amounts that were gained and lost since January 2016. These amounts were calculated with the <a href="https://github.com/bufferapp/buffer-analysis/blob/master/deliverables/mrr-breakdown.md">new Stripe MRR breakdown script</a>.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
 <p>It looks like there may be an issue with the data on the last week of June, let’s remove it. We can stil learn from this data. Let’s add <code>new</code> and <code>upgrade</code> together to get <code>net gained</code>, and <code>churn</code> and <code>downgrade</code> to get <code>net lost</code>.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
 <p>We can flip the sign on net MRR lost to more easily compare the lines.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
 <p>We can see in this graph that <code>net_lost</code> has increased over time, but so has <code>net_gained</code>. There is always a gap between the two, but it isn’t easy to tell if the gap is growing, shrinking, or staying about the same.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
 <p>We can find out by looking at the <em>overall</em> net MRR amount, which is equal to new + upgrade - churn - downgrade MRR.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
 <p>At first glance, it does appear that there may be a slight decrease in weekly new MRR in 2017 compared to 2016. There is a lot of variance here, so we can try to fit a smoother over this data to view longer term trands. The big spike and dip in July 2016 was arount the tie we were experimenting with trial lengths.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
 <p>In the past 20 months, the data suggests that there may have been a slight decrease in MRR gained in 2017 compared to 2016. This effect appears after the end of April 2017, but it doesn’t seem like the trend continues to decrease after that.</p>
 <p>This is how net MRR would look if we only looked at data from 2017.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
 <p>It is worth remembering that net MRR is the combination of new, churn, upgrade, and downgrade MRR.</p>
 </div>
 <div id="extrapolating-a-bad-scenario" class="section level3">
 <h3>Extrapolating a bad scenario</h3>
 <p>We’ve seen that there may have been a slight dip in weekly net mrr in 2017. We can go through the exercise of thinking about the worst-case scenario if the trend continues.</p>
 <p>In the very first graph of this analysis, in which I show the amount that Stripe MRR has changed each week in the past two years, we can fit a straight line through the data by fitting a linear regression model.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
 <p>We can see that this line has a negative slope, which isn’t ideal. We can extrapolate it into the future and determine how long it might take for this line, which represents the average weekly growth rate, to reach 0.</p>
 <pre class="r"><code># get linear equation
 lm_mod &lt;- lm(change ~ week, data = mrr)
@@ -80,10 +80,10 @@ sd(mrr$change, na.rm = TRUE)</code></pre>
 <p>We can now generate random samples from the distribution of MRR change. The assumes that weekly MRR change is normally distributed around 6141 with a standard deviation of 1797. Here are 10 of such numbers.</p>
 <pre class="r"><code># generate random sample of 10 months of mrr growth.
 rnorm(10, mean = mean(mrr$change, na.rm = T), sd = sd(mrr$change, na.rm = T))</code></pre>
-<pre><code>##  [1] 4357.349 5563.498 7166.190 6820.241 5968.655 3520.993 5933.818
-##  [8] 4442.220 9159.138 5286.149</code></pre>
+<pre><code>##  [1] 4437.113 6228.439 3469.006 7062.566 7132.605 5871.061 2804.827
+##  [8] 6594.012 5926.321 5029.579</code></pre>
 <p>Now let’s get a sample of 52, simulating MRR growth for the next year, and repeat this 100 times.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-21-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-21-1.png" width="672" /></p>
 <p>Each line represents a different simulation based on our historical data. This is what it would look like to plot the <em>average</em> of all 100 simulations for each week.</p>
 <pre class="r"><code>ggplot() +
   geom_line(aes(x = week, y = samp, color = run), alpha = 0.2, data = runs) +
@@ -91,14 +91,14 @@ rnorm(10, mean = mean(mrr$change, na.rm = T), sd = sd(mrr$change, na.rm = T))</c
   guides(color = FALSE) +
   theme_minimal() +
   labs(x = NULL, y = NULL, title = &quot;Weekly MRR Change Simulations&quot;)</code></pre>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
 <p>The first plot looked to be trending downwards to me, but the average is linear.</p>
 </div>
 <div id="monthly-growth-rate" class="section level3">
 <h3>Monthly growth rate</h3>
 <p>I understand that the monthly growth rate is the metric that is given the most attention, so we can look at how that has changed over time as well. It might just be good to remember that a month is not quite a standard unit of time, because months have different numbers of days (and weekdays) in them. :)</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-24-1.png" width="672" /></p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-25-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-24-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-25-1.png" width="672" /></p>
 <p>These graphs shows a very linear relationship between month and MRR, with little variation. We can fit a linear regression model to get the equation for this line.</p>
 <pre class="r"><code># get linear equation
 lm_mod &lt;- lm(mrr ~ month, data = monthly)
@@ -122,9 +122,9 @@ summary(lm_mod)</code></pre>
 ## Multiple R-squared:  0.9965, Adjusted R-squared:  0.9964 
 ## F-statistic:  6352 on 1 and 22 DF,  p-value: &lt; 2.2e-16</code></pre>
 <p>Now we can get predictions for future months.</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-27-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-27-1.png" width="672" /></p>
 <p>The blue points are the predictions from the linear model. What would the MRR growth rate look like?</p>
-<p><img src="/blog/ad-hoc-mrr-analysis_files/figure-html/unnamed-chunk-28-1.png" width="672" /></p>
+<p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-28-1.png" width="672" /></p>
 <p>We can see that the monthly MRR growth rate would trend downwards, which we’d expect. The predictions assume linear growth, which we have experienced over the long run. There will be some significant variation however, as we can see with the growth rates in red. September 2017, for example, looks set to have a monthly growth rate around 1%, which is much lower than what this model would predict.</p>
 </div>
 <div id="conclusions" class="section level3">
