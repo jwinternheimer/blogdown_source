@@ -205,9 +205,9 @@ actions_by_month &lt;- email_actions %&gt;%
   group_by(month, email, event_type) %&gt;%
   summarise(users = n_distinct(user_id))</code></pre>
 <p>Now we need to <em>spread</em> the data, so that each month, email, and event_type combination has a user count in it’s own column.</p>
-<pre class="r"><code>library(tidyr)
-
-# Spread data
+<pre class="r"><code>library(tidyr)</code></pre>
+<pre><code>## Warning: package &#39;tidyr&#39; was built under R version 3.4.1</code></pre>
+<pre class="r"><code># Spread data
 wide_actions &lt;- actions_by_month %&gt;% 
   spread(event_type, users)</code></pre>
 <p>For some reason, we only have the proper email counts from May 2017 onwards! Let’s see if we can calculate open rates, after filtering out incomplete months.</p>

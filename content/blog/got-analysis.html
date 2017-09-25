@@ -83,9 +83,9 @@ got_bigrams &lt;- df %&gt;%
 <p>Now that we have our n-grams, we can visualize the most popular ones.</p>
 <p><img src="/blog/got-analysis_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
 <p>This list is full of stopwords that don’t give us value. We can remove them by separating the two words in the bigram, removing stopwords, and reuniting the words into bigrams.</p>
-<pre class="r"><code>library(tidyr)
-
-# Separate the two words
+<pre class="r"><code>library(tidyr)</code></pre>
+<pre><code>## Warning: package &#39;tidyr&#39; was built under R version 3.4.1</code></pre>
+<pre class="r"><code># Separate the two words
 bigrams_separated &lt;- got_bigrams %&gt;%
   separate(bigram, c(&quot;word1&quot;, &quot;word2&quot;), sep = &quot; &quot;)
 

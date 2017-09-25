@@ -216,9 +216,7 @@ recent_users &lt;- users_updates_per_week %&gt;%
 recent_users &lt;- recent_users %&gt;%
   mutate(percent_of_weeks = share_now_weeks / ceiling(weeks_since_joining))</code></pre>
 <p>Cool, now let’s visualize this distribution!</p>
-<pre><code>## Warning: Removed 17652 rows containing non-finite values (stat_density).</code></pre>
 <p><img src="/blog/share-now_files/figure-html/unnamed-chunk-27-1.png" width="672" /></p>
-<pre><code>## Warning: Removed 16603 rows containing non-finite values (stat_ecdf).</code></pre>
 <p><img src="/blog/share-now_files/figure-html/unnamed-chunk-28-1.png" width="672" /></p>
 <p>These graphs indicate that most users don’t Share Now frequently. Around 69% of users in our dataset simply haven’t used the feature in the past month, so 0% of their weeks contain updates shared immediately.</p>
 <p>However, <strong><em>there is a long tail of users that do use the feature use it quite frequently</em></strong>.</p>

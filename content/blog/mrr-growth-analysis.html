@@ -80,8 +80,8 @@ sd(mrr$change, na.rm = TRUE)</code></pre>
 <p>We can now generate random samples from the distribution of MRR change. The assumes that weekly MRR change is normally distributed around 6141 with a standard deviation of 1797. Here are 10 of such numbers.</p>
 <pre class="r"><code># generate random sample of 10 months of mrr growth.
 rnorm(10, mean = mean(mrr$change, na.rm = T), sd = sd(mrr$change, na.rm = T))</code></pre>
-<pre><code>##  [1] 6731.124 8072.618 6269.548 8461.371 4806.412 7383.292 5326.358
-##  [8] 3985.097 6898.961 4170.441</code></pre>
+<pre><code>##  [1] 3734.115 4287.077 4858.102 6121.995 4720.143 8481.856 7011.816
+##  [8] 6506.066 3390.748 7898.563</code></pre>
 <p>Now let’s get a sample of 52, simulating MRR growth for the next year, and repeat this 100 times.</p>
 <p><img src="/blog/mrr-growth-analysis_files/figure-html/unnamed-chunk-21-1.png" width="672" /></p>
 <p>Each line represents a different simulation based on our historical data. This is what it would look like to plot the <em>average</em> of all 100 simulations for each week.</p>

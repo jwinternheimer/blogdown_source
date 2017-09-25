@@ -346,18 +346,18 @@ inspect(dtm_new)</code></pre>
 ## Maximal term length: 22
 ## Weighting          : term frequency (tf)
 ## Sample             :
-##        Terms
-## Docs    account accounts buffer business media plan post posts social time
-##   115         0        0      0        0     0    0    0     0      0    0
-##   17357       0        0      0        0     0    0    0     0      0    0
-##   17358       0        0      0        0     0    0    0     0      0    0
-##   21          0        0      0        0     0    0    0     0      0    0
-##   22          0        0      0        0     0    0    0     0      0    0
-##   2327        0        0      0        0     0    0    0     0      0    0
-##   255         0        0      0        0     0    0    0     0      0    0
-##   344         0        0      0        0     0    0    0     0      0    0
-##   345         0        0      0        0     0    0    0     0      0    0
-##   714         0        0      0        0     0    0    0     0      0    0</code></pre>
+##       Terms
+## Docs   account accounts buffer business media plan post posts social time
+##   138        0        0      0        0     0    0    0     0      0    0
+##   219        0        0      0        0     0    0    0     0      0    0
+##   2428       0        0      0        0     0    0    0     0      0    0
+##   25         0        0      0        0     0    0    0     0      0    0
+##   285        0        0      0        0     0    0    0     0      0    0
+##   3          0        0      0        0     0    0    0     0      0    0
+##   449        0        0      0        0     0    0    0     0      0    0
+##   450        0        0      0        0     0    0    0     0      0    0
+##   68         0        0      0        0     0    0    0     0      0    0
+##   870        0        0      0        0     0    0    0     0      0    0</code></pre>
 <pre class="r"><code># Set a seed so that the output of the model is predictable
 lda &lt;- LDA(dtm_new, k = 2, control = list(seed = 1234))
 lda</code></pre>
@@ -372,18 +372,18 @@ lda</code></pre>
 <pre class="r"><code>topics &lt;- tidy(lda, matrix = &quot;beta&quot;)
 topics</code></pre>
 <pre><code>## # A tibble: 10,542 x 3
-##    topic         term         beta
-##    &lt;int&gt;        &lt;chr&gt;        &lt;dbl&gt;
-##  1     1     integral 1.648001e-05
-##  2     2     integral 3.178251e-05
-##  3     1     allocate 4.672497e-05
-##  4     2     allocate 1.602059e-06
-##  5     1        willl 3.451380e-05
-##  6     2        willl 1.378719e-05
-##  7     1 troubleshoot 2.629537e-05
-##  8     2 troubleshoot 2.198808e-05
-##  9     1    realising 1.435645e-05
-## 10     2    realising 3.390154e-05
+##    topic          term         beta
+##    &lt;int&gt;         &lt;chr&gt;        &lt;dbl&gt;
+##  1     1 spontaneously 1.791933e-05
+##  2     2 spontaneously 3.034941e-05
+##  3     1      teammate 4.696081e-05
+##  4     2      teammate 1.355147e-06
+##  5     1           com 2.312582e-03
+##  6     2           com 7.785125e-04
+##  7     1       mention 1.970841e-04
+##  8     2       mention 1.409137e-04
+##  9     1      integral 1.566107e-05
+## 10     2      integral 3.260400e-05
 ## # ... with 10,532 more rows</code></pre>
 <p>This has turned the model into a one-topic-per-term-per-row format. For each combination, the model computes the probability of that term being generated from that topic.</p>
 <p>We could use <code>dplyr</code>’s <code>top_n()</code> to find the 10 terms that are most common within each topic.</p>
