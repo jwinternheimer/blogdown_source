@@ -10,7 +10,7 @@ _Involuntary churn_ is a subset of churn in which the cancellation event was not
 
 The reasons for the failed payments are varied, but we can assume that there are customers whose intention was to continue subscribing to the service. In most cases, they could not because their credit card either expired or was declined for one reason or another.
 
-In this analysis we'll start small. We'll try to answer three simple questions about involuntary churn to gain a better understanding of where we stand:
+In this analysis we'll try to answer three simple questions about involuntary churn to gain a better understanding of where we stand:
 
 - What is the ratio (%) of involuntary churn to total churn ?
 - How much revenue is lost to involuntary churn?
@@ -20,11 +20,11 @@ In this analysis we'll start small. We'll try to answer three simple questions a
 To answer the first question, we can query the `revenue_events` table, which records MRR-related events like _churn_, _upgrades_, _downgrades_, and the like. We can join in the `stripe._charges` table to check whether the charges associated with the last invoice were paid or failed.
 
 ```{r include = FALSE}
-# Load libraries
+# load libraries
 library(buffer); library(dplyr); library(ggplot2)
 
-# Get Redshift connection
-# con <- redshift_connect()
+# connect to redshift
+con <- redshift_connect()
 ```
 
 ```{sql eval = FALSE}
@@ -32,6 +32,7 @@ with last_invoice as (
 	select
   	i.subscription_id
   	, i.id as invoice_id
+  	, i.paid
 	from stripe._invoices as i
 	inner join (select subscription_id, max(date) as latest_date from stripe._invoices group by 1) recent
   	on i.subscription_id = recent.subscription_id
@@ -48,15 +49,28 @@ with last_invoice as (
 			on c.invoice = recent_charges.invoice
 		where c.created = recent_charges.latest_charge
 	),
-	last_invoice_and_charge as(
+	last_invoice_and_charge as (
 		select
 			last_invoice.subscription_id
+			, last_invoice.paid
 			, last_invoice.invoice_id
 			, last_charge.charge_id
 			, last_charge.captured
 		from last_invoice
 		left join last_charge
 			on last_invoice.invoice_id = last_charge.invoice_id
+	),
+	subscription_charges as (
+	  select
+	    s.id as subscription_id
+	    , count(distinct c.id) as charges
+	  from stripe._subscriptions as s
+	  left join stripe._invoices as i
+	    on s.id = i.subscription_id
+	  left join stripe._charges as c
+	    on i.charge = c.id
+	  where c.captured and i.paid
+    group by 1
 	)
 	select 
   	e.created_at
@@ -71,27 +85,32 @@ with last_invoice as (
 		, c.invoice_id
 		, c.charge_id
 		, c.captured
+		, sc.charges
 	from revenue_events as e
 	left join last_invoice_and_charge as c
 		on e.subscription_id = c.subscription_id
+	inner join subscription_charges as sc
+	  on e.subscription_id = sc.subscription_id
 	where e.mrr_type = 'churn' 
 	and e.created_at > (current_date - 730)
 ```
 
 ```{r include = FALSE}
-# Save churn events
-# save(events, file = "churn_events.Rda")
+# save churn events
+# saveRDS(events, file = "churn_events.rds")
 
-load("churn_events.Rda")
+events <- readRDS("churn_events.rds")
 ```
 
 Great, we now have around 80 thousand churn events from the past two years in a dataframe. The dataset includes the last invoice ID for that subscription, the last charge ID for that invoice, as well as whether or not the last charge for that invoice was captured. If the last charge for that subscription was not captured, we can assume that it failed, and that this churn event is an _involuntary_ one. 
+
+**This is the core assumption made in this analysis.**
 
 ## Data tidying
 In order to answer the first question regarding the ratio of involuntary churn to total churn, we'll want to group the churn events by a certain time-frame. In this analysis I'll choose to group by month, but we could also do so by week. Let's extrace the month from the `created_at` column.
 
 ```{r}
-# Extract month
+# extract month
 events <- events %>%
   mutate(month = as.Date(paste0(format(created_at, "%Y-%m"), "-01")))
 ```
@@ -101,7 +120,7 @@ There are values with NAs in this dataset. If we take a closer look at these sub
 For now, let's group the churn data by month and calculate some summary statistics. We'll calculate the number of churn events, the number of customers lost, and the MRR amount lost to churn.
 
 ```{r}
-# Group churn events by month
+# group churn events by month
 by_month <- events %>%
   group_by(month, plan_interval, captured) %>%
   summarise(events = n_distinct(id),
@@ -109,7 +128,7 @@ by_month <- events %>%
             mrr = sum(subscription_mrr_value)) %>%
   mutate(percent_of_events = events / sum(events),
          percent_of_mrr = mrr / sum(mrr)) %>%
-  filter(month != '2015-07-01' & month != '2017-07-01')
+  filter(month != min(month) & month != max(month))
 ```
 
 We're now ready for some exploratory analysis.
@@ -119,13 +138,14 @@ What percentage of all churn events is made up of _involuntary churn_?
 
 ```{r echo = FALSE}
 events %>%
+  filter(!is.na(captured) & month != min(month) & month != max(month)) %>%
   group_by(month, captured) %>%
   summarise(events = n_distinct(id),
             customers = n_distinct(customer_id),
             mrr = sum(subscription_mrr_value)) %>%
   mutate(percent_of_events = events / sum(events),
          percent_of_mrr = mrr / sum(mrr)) %>%
-  filter(month != '2015-07-01' & month != '2017-07-01' & captured == FALSE) %>%
+  filter( captured == FALSE) %>%
   ggplot(aes(x = month, y = percent_of_events)) +
   geom_point() +
   geom_line() +
@@ -153,13 +173,14 @@ Let's dig in a little deeper into this data, and calculate the percent of total 
 
 ```{r echo = FALSE}
 events %>%
+  filter(month != min(month) & month != max(month)) %>%
   group_by(month, plan_interval, captured) %>%
   summarise(events = n_distinct(id),
             customers = n_distinct(customer_id),
             mrr = sum(subscription_mrr_value)) %>%
   mutate(percent_of_events = events / sum(events),
          percent_of_mrr = mrr / sum(mrr)) %>%
-  filter(month != '2015-07-01' & month != '2017-07-01' & captured == FALSE) %>%
+  filter(captured == FALSE) %>%
   ggplot(aes(x = month, y = percent_of_events, color = plan_interval)) +
   geom_point() +
   geom_line() +
@@ -173,13 +194,14 @@ How much MRR does this represent?
 
 ```{r echo = FALSE}
 events %>%
+  filter(month != min(month) & month != max(month)) %>%
   group_by(month, captured) %>%
   summarise(events = n_distinct(id),
             customers = n_distinct(customer_id),
             mrr = sum(subscription_mrr_value)) %>%
   mutate(percent_of_events = events / sum(events),
          percent_of_mrr = mrr / sum(mrr)) %>%
-  filter(month != '2015-07-01' & month != '2017-07-01' & captured == FALSE) %>%
+  filter(captured == FALSE) %>%
   ggplot(aes(x = month, y = mrr)) +
   geom_bar(stat = 'identity') +
   theme_minimal() +
@@ -222,15 +244,15 @@ order by 1 desc
 ```
 
 ```{r include = FALSE}
-# Read in data from a csv
+# read in data from a csv
 payments <- read.csv('~/Downloads/payment_info.csv', header = T)
 
-# Fix the has_zip and has_address fields
+# fix the has_zip and has_address fields
 payments <- payments %>%
   mutate(has_zip = as.character(has_zip)) %>%
   mutate(has_zip = as.factor(ifelse(has_zip == "", "false", has_zip)))
 
-# Format the month value
+# format the month value
 payments <- payments %>%
   mutate(month = as.Date(paste0(as.character(month), '-01'))) %>%
   filter(month > '2012-03-01')
