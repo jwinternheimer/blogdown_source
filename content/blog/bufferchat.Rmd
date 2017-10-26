@@ -135,7 +135,7 @@ The three general-purpose lexicons are:
  - `bing` from Bing Liu and collaborators
  - `nrc` from Saif Mohammad and Peter Turney
  
-We'll use the `bing` lexicon to plot general sentiment, which is essentially positive - negative sentiment.
+We'll use the `bing` lexicon to plot the sentiment of the tweets during today's chat.
 
 ```{r}
 sentiment <- words %>%
@@ -156,7 +156,7 @@ ggplot(sentiment, aes(x = created_at_minute, y = sentiment)) +
        subtitle = "Number of positive tweets less number of negative tweets")
 ```
 
-I refuse to believe that there are even minutes in which there are more negative tweets than positive, so let's take a look at some of these so-called "negative" tweets's text.
+I refuse to believe that there are minutes in which there are more negative tweets than positive, so let's take a look at some of these so-called "negative" tweets.
 
 > @buffer I've seen #bufferchat before but always seem to miss them. This is my first.
 
@@ -249,7 +249,7 @@ locations <- users[!is.na(users$location),]$location
 coordinates <- get_coordinates(locations)
 ```
 
-Now we can build the map!
+Now we can build the map. 
 
 ```{r eval = FALSE}
 # get world map
@@ -272,7 +272,7 @@ ggplot() +
 
 ![](http://hi.buffer.com/0u1I0F2M0S2I/Screen%20Shot%202017-10-25%20at%206.53.28%20PM.png)
 
-And that's it! What do you all think? Anything else you'd like to see?
+That's it for now! What do you all think? Anything else you'd like to see?
 
 ```{r include = FALSE}
 detach("package:lubridate", unload=TRUE)

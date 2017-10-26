@@ -114,7 +114,7 @@ words &lt;- tweets %&gt;%
 <li><code>bing</code> from Bing Liu and collaborators</li>
 <li><code>nrc</code> from Saif Mohammad and Peter Turney</li>
 </ul>
-<p>We’ll use the <code>bing</code> lexicon to plot general sentiment, which is essentially positive - negative sentiment.</p>
+<p>We’ll use the <code>bing</code> lexicon to plot the sentiment of the tweets during today’s chat.</p>
 <pre class="r"><code>sentiment &lt;- words %&gt;%
   mutate(created_at_minute = floor_date(created_at, unit = &quot;minutes&quot;)) %&gt;%
   inner_join(get_sentiments(&quot;bing&quot;), by = &#39;word&#39;) %&gt;%
@@ -123,7 +123,7 @@ words &lt;- tweets %&gt;%
   mutate(sentiment = positive - negative)</code></pre>
 <p>Now we can plot these sentiment scores across the entirety of the chat.</p>
 <p><img src="/blog/bufferchat_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
-<p>I refuse to believe that there are even minutes in which there are more negative tweets than positive, so let’s take a look at some of these so-called “negative” tweets’s text.</p>
+<p>I refuse to believe that there are minutes in which there are more negative tweets than positive, so let’s take a look at some of these so-called “negative” tweets.</p>
 <blockquote>
 <p><span class="citation">@buffer</span> I’ve seen #bufferchat before but always seem to miss them. This is my first.</p>
 </blockquote>
@@ -209,7 +209,7 @@ locations &lt;- users[!is.na(users$location),]$location
 
 # geocode vector with addresses
 coordinates &lt;- get_coordinates(locations)</code></pre>
-<p>Now we can build the map!</p>
+<p>Now we can build the map.</p>
 <pre class="r"><code># get world map
 library(ggalt); library(ggthemes)
 
@@ -230,5 +230,5 @@ ggplot() +
 <img src="http://hi.buffer.com/0u1I0F2M0S2I/Screen%20Shot%202017-10-25%20at%206.53.28%20PM.png" />
 
 </div>
-<p>And that’s it! What do you all think? Anything else you’d like to see?</p>
+<p>That’s it for now! What do you all think? Anything else you’d like to see?</p>
 </div>
