@@ -14,9 +14,9 @@ It's well known that, for a subscription business model, subscriptions that are 
 
 ![](http://hi.buffer.com/3U3Z2f2s0G1R/Screen%20Shot%202017-11-06%20at%2010.20.17%20AM.png)
 
-A Hootsuite subscription that is billed monthly actually costs the customer \$29 per month ([source](https://iag.me/socialmedia/the-hidden-pricing-of-social-media-tools-revealed/)). This means that, for a customer that uses Hootsuite's Professional plan for one year, paying for an annual subscription up front would give the customer a 34% discount over the course of the year. In comparison, Buffer offers a 15% discount.I suspect that Hootsuite understands the added value that annual subscriptions provide, and price their plans accordingly. 
+A Hootsuite subscription that is billed monthly actually costs the customer \$29 per month ([source](https://iag.me/socialmedia/the-hidden-pricing-of-social-media-tools-revealed/)). This means that, for a customer that uses Hootsuite's Professional plan for one year, paying for an annual subscription up front would give the customer a 34% discount over the course of the year. In comparison, Buffer offers a 15% discount. I suspect that Hootsuite understands the added value of annual subscriptions well, and prices their plans accordingly. 
 
-In this analysis I will outline the effects that the plan interval has on churn, average revenue per customer, and lifetime value. This post will finish with a proposal to lower the relative cost of annual subscriptions to make them a more attractive offerring.
+In this analysis I will outline the effects that the plan interval can have on churn, average revenue per customer, and lifetime value. This post will finish with a proposal to lower the relative cost of annual subscriptions to make them a more attractive offerring to customers.
 
 ### Churn
 We can use [this Look](https://looker.buffer.com/x/MMA0UrdhKsXYkHVAxt6EWC) to compare customer churn rates of subscriptions that are billed monthly and annually. Simply put, the customer churn rate for a single day is calculated by counting the number of customers that canceled their subscriptions in the previous 28 days, and dividing that by the total number of customers that could have canceled their subscriptions in the previous 28 days.
@@ -47,7 +47,7 @@ ggplot(churn, aes(x = date, y = churn_rate, color = plan_interval)) +
 
 We can calculate a rough estimate of the overall churn by taking the weighted average of these two averages. Specifically, the overall churn rate would be the proportion of subscriptions billed monthly multiplied by the monthly subscription churn rate, plus the proportion of subscriptions billed annually multiplied by the annual subscription churn rate.
  
-As of November 2017, approximately 57% of all active subscriptions are billed monthly ([source](https://looker.buffer.com/x/pGAlNaxoTsVsiCGoDZx7z1). We can use this number to calculate the overall churn rate as a function of the percentage of subscriptions that are billed annually.
+As of November 2017, approximately 57% of all active subscriptions are billed monthly ([source](https://looker.buffer.com/x/pGAlNaxoTsVsiCGoDZx7z1)). We can use this number to calculate the overall churn rate as a function of the percentage of subscriptions that are billed annually.
 
 ```{r echo = FALSE}
 # create data frame of percentages
@@ -74,7 +74,7 @@ ggplot(df, aes(x = percent)) +
   theme_ipsum()
 ```
 
-This graph illustrates the theoretical effect that annual billing could have on the overall churn rate. This is likely the maximum feasible effect, based on the core assumption that an annual customer that would have subscribed to a monthly plan churns at the same rate as customers that had already been subscribed to annual plans. In practice that assumption probably wouldn't hold, but we would likely still see a negative effect on the overall churn rate. 
+This graph illustrates the theoretical effect that annual billing could have on the overall churn rate. This is likely the maximum feasible effect, based on the core assumption that an annual customer that would have subscribed to a monthly plan churns at the same rate as customers that had already been subscribed to annual plans. In practice that assumption probably wouldn't hold, but we would still likely see a decrease in the overall churn rate.
 
 If we were able to increase the proportion of all subscriptions that were billed annually from 47% to 60%, we could decrease the overall churn rate by around 1%, which would be equivalent to a 20% relative change. This would have a huge impact on Buffer's financial health. The chart below illustrates this.
 
@@ -112,7 +112,7 @@ ggplot(df) +
   theme_ipsum()
 ```
 
-The plot shows the effect that decreasing the churn rate from 6% to 5% would have on Total MRR over the course of 24 months, _given that everything else remained constant_. The solid black line represents how MRR would grow given that new MRR is around 7% each month and churned mrr is around 6%. This isn't too far off of what we actually see. The red dotted line represents the scenario in which new MRR remains at 7%, but churn decreases to 5%.
+The plot shows the effect that decreasing the churn rate from 6% to 5% would have on Total MRR over the course of 24 months, _given that everything else remained constant_. The solid black line represents how MRR would grow given that new MRR is around 7% each month and churned mrr is around 6%. This isn't too far off of what we actually see. The red dotted line represents the scenario in which new MRR remains at 7%, but churn decreases from 6% to 5%.
 
 After 12 months, total MRR would be around 170 thousand dollars higher, and after 24 months, MRR would be around 360 thousand dollars higher! **_This would equate to a difference of between 2 and 5 _million_ dollars per year_**! We could have the next retreat on a private island and pay for a private wifi balloon. Imagine if we managed to decrease the churn rate by 2%.
 
@@ -168,7 +168,19 @@ For subscriptions billed monthly, the monthly churn rate is around 7%. The custo
 
 To estimate the lifetime value of these customers, we calculate the average _monthly_ revenue contribution and multiply that by the customer lifetime. This is \$20.56 for monthly customers and \$12.68 for annual customers. Multiplying these amounts by customer lifetime, we get an LTV of **\$267 for monthly customers and \$507 for annual customers**. 
 
-Based on this basic calculation, the lifetime value of a customer subscribed to an annual plan is around 90% higher than that of a customer subscribed to a monthly plan. The cherry on top is the fact that more of that value is realized up-front as a yearly payment. Given the fact that there is no added cost to supporting an annual customer, this is a good deal. That's why Hootsuite gives people a 34% "discount".
+```{r echo = FALSE}
+# create data frame
+ltv <- data.frame(interval = c("Month", "Year"), ltv = c(267, 507))
+
+# plot ltv
+ggplot(ltv, aes(x = interval, y = ltv)) +
+  geom_bar(stat = 'identity') +
+  theme_ipsum() +
+  scale_y_continuous(labels = scales::dollar) +
+  labs(x = "Plan Interval", y = NULL, title = "Lifetime Value")
+```
+
+Based on this basic calculation, the lifetime value of a customer subscribed to an annual plan is around _90%_ higher than that of a customer subscribed to a monthly plan. The cherry on top is the fact that more of that value is realized up-front as a yearly payment. Given the fact that there is no added cost to supporting an annual customer, this is a good deal. That's why Hootsuite gives people a 34% "discount".
 
 ### A proposal
 I hope I've convinced you that annual billing is good for Buffer's finances. There is a lot we can do to promote annual billing - some of which could be considered low hanging fruit. We could display the prices of annual plans, in any form, on the pricing page. We could also default to diplaying the price of annual plans in monthly amounts, as Hootsuite does. I think that we can do this in a way that is less misleading, while informing the customer of discount they would receive (or how much more they would have to pay). 
