@@ -1,0 +1,95 @@
+<!-- BLOGDOWN-HEAD -->
+<!-- /BLOGDOWN-HEAD -->
+
+
+<p>On March 11, 2016, we doubled the price of all of our Business plans. We measured the effect that this change had on MRR and new MRR, but don’t have the best understanding of the effect that it had on upgrades from Awesome plans.</p>
+<p>My hypothesis is that the percentage of Awesome customers that eventually upgraded to a Business subscription decreased significantly, but we don’t yet know if that is true. To test this hypothesis, we can gather all captured charges from Awesome customers, and calculate the percentage of them that later subscribed to a Business subscription.</p>
+<div id="data-collection" class="section level3">
+<h3>Data collection</h3>
+<p>We can write a SQL query that will return the customer and plan IDs for every charge made in the 12 months surrounding the price change. We will exclude refunded charges.</p>
+<pre class="r"><code># connect to redshift
+con &lt;- redshift_connect()</code></pre>
+<pre class="sql"><code>select
+  c.created as charge_date
+  , c.customer as customer_id
+  , i.subscription_plan_id as plan_id
+  , p.simplified_plan_id
+from stripe._charges as c
+inner join stripe._invoices as i
+  on c.invoice = i.id
+left join simplified_billing_plan as p
+  on i.subscription_plan_id = p.plan_id
+where c.captured
+  and c.refunded = FALSE
+  and c.created &gt;= &#39;2015-09-13&#39;
+  and c.created &lt;= &#39;2016-09-07&#39;</code></pre>
+<p>Great, we have lots of charges to sift through now. We have to identify upgrades.</p>
+</div>
+<div id="identifying-upgrades" class="section level3">
+<h3>Identifying upgrades</h3>
+<p>To do this, we’ll need to group the charges by customer and find the first charge date of the awesome and business subscriptions, if they exist.</p>
+<pre class="r"><code># replace enterprise with business
+charges &lt;- charges %&gt;%
+  mutate(simplified_plan_id = gsub(&#39;enterprise&#39;, &#39;business&#39;, simplified_plan_id))
+
+# count number of plan types users have charges for
+plan_counts &lt;- charges %&gt;%
+  filter(simplified_plan_id == &#39;awesome&#39; | simplified_plan_id == &#39;business&#39; ) %&gt;%
+  group_by(customer_id) %&gt;%
+  summarise(plan_types = n_distinct(simplified_plan_id))
+
+# group by customer
+by_customer &lt;- charges %&gt;%
+  group_by(customer_id, simplified_plan_id) %&gt;%
+  summarise(first_charge_date = min(charge_date)) %&gt;%
+  inner_join(plan_counts, by = &#39;customer_id&#39;)</code></pre>
+<p>When a user has charges for awesome and business charges, we can assume that an upgrade occurred <em>if the business charge comes at a later date</em>.</p>
+<pre class="r"><code># filter to only show customers with &gt; 1 plan
+customers &lt;- by_customer %&gt;%
+  filter(plan_types &gt; 1) %&gt;%
+  spread(simplified_plan_id, first_charge_date)
+
+# remove NULL plan ID
+customers &lt;- customers[, -5]
+
+# rename columns
+colnames(customers) &lt;- c(&#39;customer_id&#39;, &#39;plan_types&#39;, &#39;first_awesome_charge&#39;, &#39;first_business_charge&#39;)
+
+# identify upgrades
+customers &lt;- customers %&gt;%
+  mutate(upgraded = first_business_charge &gt; first_awesome_charge)</code></pre>
+<p>Now let’s plot the number of upgrades that occurred each week.</p>
+<p><img src="business-pricing-and-upgrades_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>We can see a slight decrease after the price change went into effect. Let’s try to determine the size of this effect, and whether or not it is statistically significant.</p>
+</div>
+<div id="estimating-causal-impact" class="section level3">
+<h3>Estimating causal impact</h3>
+<p>We can use the <code>CausalImpact</code> package to estiamte the effect that the price change had on upgrades to Business plans from customers that were previously on Awesome subscriptions.</p>
+<p>To perform inference, we run the analysis using the <code>CausalImpact</code> command.</p>
+<pre class="r"><code># run analysis
+impact &lt;- CausalImpact(upgrades_ts, pre.period, post.period, model.args = list(niter = 5000))</code></pre>
+<p>Let’s plot the outcome.</p>
+<pre class="r"><code># plot results
+plot(impact)</code></pre>
+<p><img src="business-pricing-and-upgrades_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>Let’s summarise the effect.</p>
+<pre class="r"><code>summary(impact)</code></pre>
+<pre><code>## Posterior inference {CausalImpact}
+## 
+##                          Average       Cumulative     
+## Actual                   29            723            
+## Prediction (s.d.)        31 (4)        769 (100)      
+## 95% CI                   [23, 38]      [574, 960]     
+##                                                       
+## Absolute effect (s.d.)   -1.8 (4)      -45.9 (100)    
+## 95% CI                   [-9.5, 5.9]   [-237.2, 148.6]
+##                                                       
+## Relative effect (s.d.)   -6% (13%)     -6% (13%)      
+## 95% CI                   [-31%, 19%]   [-31%, 19%]    
+## 
+## Posterior tail-area probability p:   0.3056
+## Posterior prob. of a causal effect:  69%
+## 
+## For more details, type: summary(impact, &quot;report&quot;)</code></pre>
+<p>We can’t quite say that there was a statistically significant effect on the number of upgrades.</p>
+</div>
