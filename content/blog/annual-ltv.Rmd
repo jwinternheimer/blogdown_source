@@ -3,18 +3,18 @@ date: 2017-11-06T10:14:27-05:00
 subtitle: ""
 tags: []
 type: "post"
-title: "Another case for annual subscriptions"
+title: "A case for annual subscriptions"
 ---
 
 ```{r include = FALSE, message = FALSE, warning = FALSE}
 library(buffer); library(dplyr); library(ggplot2); library(hrbrthemes)
 ```
 
-It's well known that, for a subscription business model, subscriptions that are billed on an annual basis are more valuable than subsciptions billed monthly. That's why many saas companies use the slightly misleading tactic of displaying a monthly price with an asterisk that indicates that the amount is the monthly amount of a subsciption billed _annually_. The prospective customer has to either multiply the amount by twelve to see what he or she will actually be billed, or lose out on this "deal" and pay more to be billed monthly.  
+It's fairly well known that, for a subscription business model, subscriptions that are billed annually are more valuable than subsciptions billed monthly. That's why many SaaS companies use the slightly misleading tactic of displaying a monthly price with an asterisk that indicates that the amount is the monthly amount of a subsciption billed _annually_. The prospective customer has to either multiply the amount by twelve to see what he or she will actually be billed, or lose out on this "deal" and pay more to be billed monthly.  
 
 ![](http://hi.buffer.com/3U3Z2f2s0G1R/Screen%20Shot%202017-11-06%20at%2010.20.17%20AM.png)
 
-A Hootsuite subscription that is billed monthly actually costs the customer \$29 per month ([source](https://iag.me/socialmedia/the-hidden-pricing-of-social-media-tools-revealed/)). This means that, for a customer that uses Hootsuite's Professional plan for one year, paying for an annual subscription up front would give the customer a 34% discount over the course of the year. In comparison, Buffer offers a 15% discount. I suspect that Hootsuite understands the added value of annual subscriptions well, and prices their plans accordingly. 
+A Hootsuite subscription that is billed monthly actually costs the customer \$29 per month ([source](https://iag.me/socialmedia/the-hidden-pricing-of-social-media-tools-revealed/)). This means that, for a customer that uses Hootsuite's Professional plan for one year, paying for an annual subscription up front would give the customer a 34% discount over the course of the year. In comparison, Buffer offers a 15% discount. I suspect that Hootsuite understands the added value of annual subscriptions, and tries to price their plans accordingly. 
 
 In this analysis I will outline the effects that the plan interval can have on churn, average revenue per customer, and lifetime value. This post will finish with a proposal to lower the relative cost of annual subscriptions to make them a more attractive offerring to customers.
 
