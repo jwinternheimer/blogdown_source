@@ -60,7 +60,7 @@ group by 1, 2, 3
 # saveRDS(biz_users, file = 'biz_users.rds')
 
 # load updates data
-biz_users <- readRDS('biz_users.rds')
+biz_users <- readRDS('/Users/julianwinternheimer/Documents/blogdown_source/content/blog/biz_users.rds')
 ```
 
 Users that are on Buffer for Business trials are considered to be Business users in this query, so we'll want to filter this dataset to include only business users that have at least one successful charge _for a business subscription_. The following query will give us the number of successful charges for each user, as well as the most recent `subscription_id`.
@@ -115,7 +115,7 @@ with recent_charges as ( -- get most recent charge ID for each customer
 # saveRDS(biz_charges, file = 'biz_charges.rds')
 
 # load charges data
-biz_charges <- readRDS('biz_charges.rds')
+biz_charges <- readRDS('/Users/julianwinternheimer/Documents/blogdown_source/content/blog/biz_charges.rds')
 ```
 
 Now we join the two datasets with an `inner_join`, so that only users with successful charges are included.
