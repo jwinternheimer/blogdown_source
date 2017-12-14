@@ -1,0 +1,80 @@
+---
+date: 2017-12-14T13:29:40-05:00
+subtitle: ""
+tags: []
+type: "post"
+title: "An exploration of Awesome profile counts"
+---
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+library(dplyr)
+```
+
+In order to gain a better understanding of how Buffer's customers use the product within the constraint of the current plan limits, we can explore the data related to users' _active_ profiles. More specifically, we can use this data to answer the question "How many Awesome users with up to 3 Active profiles connected have 2 or 3 of the same profile types?"
+
+This is a very specific question. It will help us learn about usage and inform future decisions related to Buffer's pricing structure. In order to fully answer this question, we can gather all of the profiles associated with Buffer users that are on an Awesome plan. 
+
+### Data collection
+We can use the data in [this Look](https://looker.buffer.com/x/NcAnzPT96HaoHTktwilFXI) for our analysis. We read the data into our R session and clean it up a bit.
+
+```{r}
+# read data
+profiles <- readRDS('awesome_user_profiles.rds')
+
+# set column names
+colnames(profiles) <- c('user_id', 'profile_id', 'service', 'updates')
+```
+
+There are approximately 71 thousand users in this dataset and 384 thousand profiles. 
+
+### How many users have three or less active profiles
+One of the fields in our dataframe, `updates`, represents the number of posts that have been scheduled for a specific profile in the past 30 days. If the value in this column is `NA`, we assume that the profile is inactive. If the value is greater than or equal to one, we consider the profile active.
+
+```{r}
+# determine if profile is active
+profiles <- profiles %>%
+  mutate(is_active = !is.na(updates))
+```
+
+Now, let's count how many Awesome users have 3 or less active profiles.
+
+```{r}
+# group by user and count active profiles
+by_user <- profiles %>%
+  filter(is_active == TRUE) %>% 
+  group_by(user_id) %>% 
+  summarise(active_profiles = n_distinct(profile_id))
+
+# find number of users with 3 or less active profiles
+n_distinct(filter(by_user, active_profiles <= 3)$user_id)
+```
+
+**Out of the 71,412 Awesome users in our dataset, 23,168 (32%) have 3 or less active profiles!**
+
+### How many of these users have two or more profiles from the same social network? 
+In order to answer this question, we'll need to do some grouping. First, let's join the grouped users data with the profiles data, and only include users that have three or less active profiles.
+
+```{r}
+# join users with profiles
+active_user_profiles <- profiles %>% 
+  inner_join(by_user, by = 'user_id') %>% 
+  filter(active_profiles <= 3)
+```
+
+Now, of these users, how many have two or more profiles from the same social network?
+
+```{r}
+# now look at how many have two or three profiles of the same type
+users_with_multiple_profiles <- active_user_profiles %>% 
+  group_by(user_id, service) %>% 
+  summarise(profiles = n_distinct(profile_id)) %>% 
+  filter(profiles > 1)
+
+# group by service and count users
+users_with_multiple_profiles %>%
+  group_by(service) %>% 
+  summarise(users = n_distinct(user_id)) %>%
+  arrange(desc(users))
+```
+
+We can see that Facebook, Twitter, and Instagram are the most popular social networks for users that have two or more active profiles of the same type. **In total, 7682 (10.7%) users fit this criteria.**

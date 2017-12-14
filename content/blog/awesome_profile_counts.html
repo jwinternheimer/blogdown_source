@@ -1,0 +1,70 @@
+---
+date: 2017-12-14T13:29:40-05:00
+subtitle: ""
+tags: []
+type: "post"
+title: "An exploration of Awesome profile counts"
+---
+
+
+
+<p>In order to gain a better understanding of how Buffer’s customers use the product within the constraint of the current plan limits, we can explore the data related to users’ <em>active</em> profiles. More specifically, we can use this data to answer the question “How many Awesome users with up to 3 Active profiles connected have 2 or 3 of the same profile types?”</p>
+<p>This is a very specific question. It will help us learn about usage and inform future decisions related to Buffer’s pricing structure. In order to fully answer this question, we can gather all of the profiles associated with Buffer users that are on an Awesome plan.</p>
+<div id="data-collection" class="section level3">
+<h3>Data collection</h3>
+<p>We can use the data in <a href="https://looker.buffer.com/x/NcAnzPT96HaoHTktwilFXI">this Look</a> for our analysis. We read the data into our R session and clean it up a bit.</p>
+<pre class="r"><code># read data
+profiles &lt;- readRDS(&#39;awesome_user_profiles.rds&#39;)
+
+# set column names
+colnames(profiles) &lt;- c(&#39;user_id&#39;, &#39;profile_id&#39;, &#39;service&#39;, &#39;updates&#39;)</code></pre>
+<p>There are approximately 71 thousand users in this dataset and 384 thousand profiles.</p>
+</div>
+<div id="how-many-users-have-three-or-less-active-profiles" class="section level3">
+<h3>How many users have three or less active profiles</h3>
+<p>One of the fields in our dataframe, <code>updates</code>, represents the number of posts that have been scheduled for a specific profile in the past 30 days. If the value in this column is <code>NA</code>, we assume that the profile is inactive. If the value is greater than or equal to one, we consider the profile active.</p>
+<pre class="r"><code># determine if profile is active
+profiles &lt;- profiles %&gt;%
+  mutate(is_active = !is.na(updates))</code></pre>
+<p>Now, let’s count how many Awesome users have 3 or less active profiles.</p>
+<pre class="r"><code># group by user and count active profiles
+by_user &lt;- profiles %&gt;%
+  filter(is_active == TRUE) %&gt;% 
+  group_by(user_id) %&gt;% 
+  summarise(active_profiles = n_distinct(profile_id))
+
+# find number of users with 3 or less active profiles
+n_distinct(filter(by_user, active_profiles &lt;= 3)$user_id)</code></pre>
+<pre><code>## [1] 23168</code></pre>
+<p><strong>Out of the 71,412 Awesome users in our dataset, 23,168 (32%) have 3 or less active profiles!</strong></p>
+</div>
+<div id="how-many-of-these-users-have-two-or-more-profiles-from-the-same-social-network" class="section level3">
+<h3>How many of these users have two or more profiles from the same social network?</h3>
+<p>In order to answer this question, we’ll need to do some grouping. First, let’s join the grouped users data with the profiles data, and only include users that have three or less active profiles.</p>
+<pre class="r"><code># join users with profiles
+active_user_profiles &lt;- profiles %&gt;% 
+  inner_join(by_user, by = &#39;user_id&#39;) %&gt;% 
+  filter(active_profiles &lt;= 3)</code></pre>
+<p>Now, of these users, how many have two or more profiles from the same social network?</p>
+<pre class="r"><code># now look at how many have two or three profiles of the same type
+users_with_multiple_profiles &lt;- active_user_profiles %&gt;% 
+  group_by(user_id, service) %&gt;% 
+  summarise(profiles = n_distinct(profile_id)) %&gt;% 
+  filter(profiles &gt; 1)
+
+# group by service and count users
+users_with_multiple_profiles %&gt;%
+  group_by(service) %&gt;% 
+  summarise(users = n_distinct(user_id)) %&gt;%
+  arrange(desc(users))</code></pre>
+<pre><code>## # A tibble: 6 x 2
+##     service users
+##      &lt;fctr&gt; &lt;int&gt;
+## 1  facebook  4150
+## 2   twitter  2058
+## 3 instagram   721
+## 4  linkedin   564
+## 5    google   119
+## 6 pinterest    70</code></pre>
+<p>We can see that Facebook, Twitter, and Instagram are the most popular social networks for users that have two or more active profiles of the same type. <strong>In total, 7682 (10.7%) users fit this criteria.</strong></p>
+</div>
