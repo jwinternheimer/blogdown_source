@@ -1,5 +1,5 @@
 ---
-date: 2017-11-01T11:38:42-04:00
+date: 2018-01-03T11:38:42-04:00
 subtitle: ""
 tags: []
 type: "post"
@@ -15,11 +15,11 @@ title: "Effect of landing page and upgrade modal intervention on Awesome MRR"
  - Awesome trialists still need time to convert and finish trials.
  
 ### Background
-In September, Buffer experienced a period of relatively low [MRR growth](https://github.com/bufferapp/buffer-analysis/blob/master/deliverables/september_mrr_analysis.md). This was especially impactful for the Awesome plans, which saw a sharp and distinct decrease in growth. 
+Back in September, Buffer experienced a period of relatively low [MRR growth](https://github.com/bufferapp/buffer-analysis/blob/master/deliverables/september_mrr_analysis.md). This was especially impactful for the Awesome plans, which saw a sharp and distinct decrease in growth. 
 
 There were several factors that could have contributed to this change: landing page changes, product changes, churn, and bugs all conspired to create a batch effect that slowed growth for Awesome subscriptions. After a lot of analysis and many conversations, we [took action](https://paper.dropbox.com/doc/Meeting-notes-Awesome-trial-decline-Landing-page-changes-cR1SIYptglsspqVOnN0He) on October 11 by [fixing a bug](https://buffer.slack.com/archives/C14F676AZ/p1507709680000379?thread_ts=1507624638.000063&cid=C14F676AZ) that prevented the Awesome upgrade modal from appearing and on October 13 by reverting some changes made to the landing page.
 
-It has now been a couple of weeks, so we can try to measure the impact that these changes have made so far on Awesome trials and Awesome MRR. In order to estimate the effects, we'll use an R package written by Google engineers for causal inference called `CausalImpact`. A controlled experiment is the gold standard for estimating effect sizes, but we don't have that here -- we effectively put everyone in the experiment group. Sometimes that is necessary! There are still ways to estimate effect sizes however.
+It has been a few months since we've made these changes, so we can try to measure the impact that these changes have made so far on Awesome trials and Awesome MRR. In order to estimate the effects, we'll use an R package written by Google engineers for causal inference called `CausalImpact`. A controlled experiment is the gold standard for estimating effect sizes, but we don't have that here -- we effectively put everyone in the experiment group. Sometimes that is necessary! There are still ways to estimate effect sizes.
 
 The idea is this: given a response time series (e.g. trials, revenue) and a set of control time series (e.g. clicks in non-affected markets or clicks on other sites), the package constructs a Bayesian structural time-series model. This model is then used to try and predict the counterfactual, i.e. how the response metric would have evolved after the intervention if the intervention had never occurred. 
 
@@ -31,14 +31,14 @@ Let's give it a shot!
 Before we look at MRR, let's look at the number of Awesome trials started. I believe these are more directly under our control - we have a greater influence on the number of trial starts than we do over the number of people that subscribe or churn.
 
 ```{r include = FALSE, warning = FALSE, message = FALSE}
-library(dplyr); library(buffer); library(ggplot2); library(CausalImpact)
+library(dplyr); library(buffer); library(ggplot2); library(CausalImpact); library(hrbrthemes)
 ```
 
 We'll use the data in [this Look](https://looker.buffer.com/looks/4171) and import it using the `buffer` package.
 
 ```{r warning = FALSE, message = FALSE, eval = FALSE}
 # import data from Looker
-trials <- get_look(4171)
+# trials <- get_look(4171)
 ```
 
 ```{r include = FALSE}
@@ -65,10 +65,11 @@ Great, let's plot these values out.
 ggplot(trials) +
   geom_line(aes(x = start_date, y = awesome_trials, color = 'Awesome')) +
   geom_line(aes(x = start_date, y = business_trials, color = 'Business')) +
-  labs(x = NULL, y = NULL, title = "Trials Started")
+  labs(x = NULL, y = NULL, title = "Trials Started", color = "Trial Type") +
+  theme_ipsum()
 ```
 
-Cool, we might be able to detect a nice increase in awesome trial starts here. Let's try to estimate the impact that the change we made on October 13 had on trial starts by building the counterfactual. Remember, we'll use the number of business trials started as a predictor of the number of awesome trials started. 
+Immediately we can see a large "bump" in the number of Awesome trials around the end of October. This is likely due to an experiment that we ran to measure the effects of a simplified and more-limited free plan. This is a major confounding variable that may also effect revenue, but we may be able to control for it.
 
 ```{r}
 # load zoo package
@@ -79,24 +80,24 @@ trials_ts <- zoo(dplyr::select(trials, awesome_trials:business_trials), trials$s
 
 # specify the pre and post periods
 pre.period <- as.Date(c("2017-07-04", "2017-10-10"))
-post.period <- as.Date(c("2017-10-11", "2017-10-31"))
+post.period <- as.Date(c("2017-10-11", "2017-10-27"))
 ```
 
-To perform inference, we run the analysis using the `CausalImpact` command.
+We defined the post-intervention period to be from October 11, when the changes were made, to October 27. The reason that I cut it off was that the free plan experiment began around October 26, and this confounds the data. We try to limit this effect somewhat here. To perform inference, we run the analysis using the `CausalImpact` command.
 
-```{r}
+```{r warning = FALSE, message = FALSE}
 # run analysis
 impact <- CausalImpact(trials_ts, pre.period, post.period, model.args = list(niter = 5000, nseasons = 7))
 ```
 
-Let's plot the outcome.
+Let's plot the outcome of the model.
 
 ```{r warning = FALSE, message = FALSE}
 # plot results
 plot(impact)
 ```
 
-Wow, the results are something! The top panel in the graph shows the counterfactual as a dotted line and blue confidence interval -- this is the estimate of what trials would have been _without an intervention_. The solid black line shows the number of Awesome trials that actually were started.
+The resulting plot is quite interesting. The top panel in the graph shows the counterfactual as a dotted line and blue confidence interval -- this is the estimate of what trials would have been _without an intervention_. The solid black line shows the number of Awesome trials that actually were started.
 
 The middle panel shows the point estimate of the effect of the intervention on each day. We can see that the point estimate of the effect is around 25-100 extra trials _each day_.
 
@@ -109,7 +110,7 @@ How can we determine if this effect is statistically significant? That is the co
 summary(impact)
 ```
 
-This summary tells us that we've seen an average of 215 awesome trials since the action was taken. The predicted average, based on previous months worth of data, would have been 166. The relative effect was a 30% increase in awesome trial starts -- the 95% confidence interval for this effect size is [24%, 35%]. That's a big effect. 
+This summary tells us that we've seen an average of 217 awesome trials since the action was taken. The predicted average, based on previous months worth of data, would have been 166. The relative effect was a 30% increase in awesome trial starts -- the 95% confidence interval for this effect size is [24%, 36%]. That's a big effect!
 
 The probability of a true causal effect is very high (99.98%), which makes sense given what we saw in the graphs. Nice! 
 
@@ -146,7 +147,8 @@ Let's plot the values.
 ggplot(mrr) +
   geom_line(aes(x = date, y = awesome_mrr, color = 'Awesome')) +
   geom_line(aes(x = date, y = business_mrr, color = 'Business')) +
-  labs(x = NULL, y = NULL, title = "MRR Values")
+  labs(x = NULL, y = NULL, title = "Total MRR", color = "Type") +
+  theme_ipsum()
 ```
 
 Now let's try to see if we've been able to make any impact on Awesome MRR. 
@@ -166,15 +168,15 @@ mrr_impact <- CausalImpact(mrr_ts, pre.period, post.period, model.args = list(ni
 plot(mrr_impact)
 ```
 
-This is an interesting one. Please ignore the `cumulative` panel, as it is not relevant to us here (MRR is already an aggregation and we don't sum it every day). 
+Please ignore the `cumulative` panel, as it is not relevant to us here (MRR is already an aggregation and we don't sum it every day). 
 
-The `original` panel shows the counterfactual, as well as the confidence bands, as the dotted line and blue ribbon. The solid black line is the actual MRR amounts we've seen. We can see here that the observed values (the solid black line) are within the bounds of the confidence interval. 
+The `original` panel shows the counterfactual, as well as the confidence bands, as the dotted line and blue ribbon. The solid black line is the actual MRR amounts we've seen. We can see here that the observed values (the solid black line) are within the bounds of the confidence interval during the time window we have selected. However, we can see that there are indications of a positive effect on Awesome MRR during  this timeframe. 
 
-The `pointwise` panel indicates the point estimate of the effect, which ,at its maximum value, was less than \$1000. There doesn't appear to have been any significant effect on MRR yet.
+If we look beyond the effect period, we can see that the free plan experiment does indeed seem to have a positive effect on Awesome MRR.
 
 ```{r}
 # summarise model
 summary(mrr_impact)
 ```
 
-The summary confirms that we have not yet seen any significant effect on Awesome MRR.
+The summary confirms that we have not seen a sufficiently large enough effect on Awesome MRR to attribute it directly to the changes made to landing pages.

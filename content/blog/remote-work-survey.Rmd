@@ -1,0 +1,1167 @@
+---
+date: 2017-12-19T09:57:02-05:00
+subtitle: ""
+tags: []
+type: "post"
+title: "The State of Social Media"
+---
+
+Towards the end of 2017, Buffer sent out a survey to gauge the state of social media going into 2018. We had over 1700 responses, which we downloaded as a csv file and stored as an R data object. The questions and responses can be viewed [here](https://buffersurvey.typeform.com/report/GjSFVB/HfeZpvRiBKZDRH7a).
+
+The survey consisted of 30 questions about how users use social media. 
+
+```{r include = FALSE, message = FALSE, warning = FALSE}
+# load packages
+library(dplyr); library(ggplot2); library(tidyr); library(buffer)
+library(hrbrthemes); library(scales)
+```
+
+```{r}
+# get response data
+responses <- readRDS('state-of-social.rds')
+```
+
+The data is quite messy and untidy. Let's begin by addressing the column names. We can use the `safe_names()` function in the `buffer` package to take care of uppercase letters and periods in the column names.
+
+```{r}
+# clean up column names
+colnames(responses) <- safe_names(colnames(responses))
+```
+
+The column names in the dataframe are just the questions. These are too long to work with efficiently, so we'll replace them with question numbers `q1` through `q87`. You might wonder why there are 88 columns in our dataframe. We have so many columns because some of the questions in the survey allow for multiple responses. 
+
+For example, the question "Which of the following channels does your business use currently?" could be answered with any combination of social networks, e.g. Facebook, Facebook and Snapchat, Linkedin and Twitter and Facebook, etc. This survey question can be broken apart into eight individual questions corresponding to each social network. The question really asks "does your business use Facebook?", "does your business use Twitter?", "does your business use Pinterest?", etc. 
+
+Now, let's create a lookup table that will help us reference the worded question for each question number.
+
+```{r}
+# create lookup table for questions
+questions <- data_frame(number = character(87), question = character(87))
+
+# set the question numbers
+questions$number <- paste0('q', seq(1:87))
+
+# set the worded questions
+questions$question <- colnames(select(responses, -x_))
+```
+
+Nice, now we'll be able to look up the question for each question number. Let's replace the column names in our `responses` dataframe.
+
+```{r}
+# set column names
+column_names <- c('user_id', questions$number)
+
+# replace column names
+colnames(responses) <- column_names
+```
+
+Alright, I think we're ready for some exploratory analysis!
+
+### Exploratory analysis
+The first few questions we ask are about the companies the respondents work for. We ask about their industries, size, and social media profiles. Let's plot a few histograms to see what some common combinations are.
+
+```{r echo = FALSE}
+# plot industry histogram
+responses %>%
+  count(q1) %>%
+  mutate(q1 = reorder(q1, n)) %>% 
+  ggplot(aes(x = q1, y = n)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() +
+  labs(x = NULL, y = NULL, title = "Respondent Industry") +
+  theme_ipsum()
+```
+
+We can see that over 400 respondents work in marketing, PR, or advertising. They represent around 23% of all respondents. Media and publishing, non-profits, consumer products, and education make up another 37% of respodents.
+
+Let's take a look at the sizes of these commpanies.
+
+```{r echo = FALSE}
+# plot conpany size
+responses %>%
+  count(q2) %>%
+  mutate(q2 = reorder(q2, n)) %>% 
+  ggplot(aes(x = q2, y = n)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() +
+  labs(x = NULL, y = NULL, title = "Company Size") +
+  theme_ipsum()
+```
+
+Most of the respondents worked for small companies. The most common response company size was just a single person! Let's explore the relationship between the two.
+
+```{r}
+table(responses$q1, responses$q2)
+```
+
+We can see that the most common responses are Marketing, PR, and Advertising companies with fewer than 10 employees, including single employees.
+
+We can plot the combinations with at least 25 respondents.
+
+```{r echo = FALSE}
+# plot conpany size
+responses %>%
+  mutate(combination = paste(q1, q2, sep = ' - ')) %>% 
+  count(combination) %>%
+  filter(n >= 25) %>% 
+  mutate(combination = reorder(combination, n)) %>% 
+  ggplot(aes(x = combination, y = n)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() +
+  labs(x = NULL, y = NULL, title = "Industry and Company Size") +
+  theme_ipsum()
+```
+
+We can see that only a few of the most popular combinations have a team size over 10. Now let's try to answer a few specific questions.
+
+### Which social media network is the highest priority for B2C and B2B businesses?
+In question four, we asked whether the respondents' companies were business-to-business (B2B) or business-to-consumer (B2C). Questions 14 through 21 correspond to the responses of the question "Which of the following channels are the highest priority for your business?"
+
+We can try to determine if there are any significant differences in priorities for B2B and B2C companies. We treat the answers to questions 14 through 21 as individual responses, even though they are in fact responses to a single question (question number 7 in the original Typeform survey).
+
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+library(gridExtra)
+
+facebook <- responses %>% 
+  select(q4, q14:q21) %>% 
+  group_by(q4, q14) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(q4 != '' & q14 != '') %>% 
+  ungroup() %>% 
+  mutate(q4 = reorder(q4, percent)) %>% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#3B5998') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Facebook",
+       subtitle = "Highest priority network")
+
+twitter <- responses %>% 
+  select(q4, q15:q21) %>% 
+  group_by(q4, q15) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(q4 != '' & q15 != '') %>% 
+  ungroup() %>% 
+  mutate(q4 = reorder(q4, percent)) %>% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#1DA1F2') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Twitter",
+       subtitle = "Highest priority network")
+
+instagram <- responses %>% 
+  select(q4, q16:q21) %>% 
+  group_by(q4, q16) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(q4 != '' & q16 != '') %>% 
+  ungroup() %>% 
+  mutate(q4 = reorder(q4, percent)) %>% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#222222') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Instagram",
+       subtitle = "Highest priority network")
+
+linkedin <- responses %>% 
+  select(q4, q17:q21) %>% 
+  group_by(q4, q17) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(q4 != '' & q17 != '') %>% 
+  ungroup() %>% 
+  mutate(q4 = reorder(q4, percent)) %>% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#0077B5') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Linkedin",
+       subtitle = "Highest priority network")
+
+google <- responses %>% 
+  select(q4, q18:q21) %>% 
+  group_by(q4, q18) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(q4 != '' & q18 != '') %>% 
+  ungroup() %>% 
+  mutate(q4 = reorder(q4, percent)) %>% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#DB4437') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Google+",
+       subtitle = "Highest priority network")
+
+snapchat <- responses %>% 
+  select(q4, q19:q21) %>% 
+  group_by(q4, q19) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(q4 != '' & q19 != '') %>% 
+  ungroup() %>% 
+  mutate(q4 = reorder(q4, percent)) %>% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = 'identity', fill = 'orange') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Snapchat",
+       subtitle = "Highest priority network")
+
+pinterest <- responses %>% 
+  select(q4, q20:q21) %>% 
+  group_by(q4, q20) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(q4 != '' & q20 != '') %>% 
+  ungroup() %>% 
+  mutate(q4 = reorder(q4, percent)) %>% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#BD081C') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Pinterest",
+       subtitle = "Highest priority network")
+
+youtube <- responses %>% 
+  select(q4, q21:q21) %>% 
+  group_by(q4, q21) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(q4 != '' & q21 != '') %>% 
+  ungroup() %>% 
+  mutate(q4 = reorder(q4, percent)) %>% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#cc181e') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Youtube",
+       subtitle = "Highest priority network")
+
+grid.arrange(facebook, twitter, linkedin,
+             instagram, google, snapchat, 
+             pinterest, youtube, ncol = 2)
+```
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# get counts for business type
+fb <- responses %>% 
+  select(q4, q14) %>% 
+  rename(network = q14) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & network == 'Facebook')
+
+twitter <- responses %>% 
+  select(q4, q15) %>% 
+  rename(network = q15) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & network == 'Twitter')
+
+ig <- responses %>% 
+  select(q4, q16) %>% 
+  rename(network = q16) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & network == 'Instagram')
+
+li <- responses %>% 
+  select(q4, q17) %>% 
+  rename(network = q17) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & network == 'LinkedIn')
+
+google <- responses %>% 
+  select(q4, q18) %>% 
+  rename(network = q18) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & network == 'Google+')
+
+snap <- responses %>% 
+  select(q4, q19) %>% 
+  rename(network = q19) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & network == 'Snapchat')
+
+pin <- responses %>% 
+  select(q4, q20) %>% 
+  rename(network = q20) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & network == 'Pinterest')
+
+youtube <- responses %>% 
+  select(q4, q21) %>% 
+  rename(network = q21) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & network == 'YouTube')
+
+by_type <- fb %>% 
+  bind_rows(twitter) %>% 
+  bind_rows(ig) %>% 
+  bind_rows(li) %>% 
+  bind_rows(google) %>% 
+  bind_rows(snap) %>% 
+  bind_rows(pin) %>% 
+  bind_rows(youtube)
+
+# calculate log ratios for the network counts
+network_counts <- by_type %>%
+  count(q4, network) %>%
+  spread(q4, n, fill = 0) %>%
+  mutate(total = B2B + B2C,
+         B2B = (B2B + 1) / sum(B2B + 1),
+         B2C = (B2C + 1) / sum(B2C + 1),
+         log_ratio = log2(B2C / B2B),
+         abs_ratio = abs(log_ratio)) %>%
+  arrange(desc(log_ratio))
+```
+
+```{r echo = FALSE}
+network_counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "B2B"', "More 'B2C'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(network = reorder(network, log_ratio)) %>%
+    ggplot(aes(network, log_ratio, color = direction)) +
+    geom_segment(aes(x = network, xend = network,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "Most Important Networks for B2B and B2C Companies") +
+    scale_color_discrete(name = "", labels = c("More 'B2C'", "More 'B2B'")) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c("8X", "4X", "2X", 
+                                  "Same", "2X", "4X", "8X"))
+```
+
+### Are B2B companies more likely to create Instagram strategy?
+
+```{r}
+responses %>% 
+  select(q4, q23) %>% 
+  group_by(q4, q23) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(q4 != '' & q23 != '' & q23 == "Yes") %>% 
+  ungroup() %>% 
+  mutate(q4 = reorder(q4, percent)) %>% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Instagram strategy",
+       subtitle = "Percentage of companies that created a story in 2017")
+```
+
+```{r echo = FALSE}
+stories <- responses %>% 
+  select(q4, q23) %>% 
+  rename(stories = q23) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & stories != '')
+
+# calculate log ratios for the network counts
+counts <- stories %>%
+  count(q4, stories) %>%
+  spread(q4, n, fill = 0) %>%
+  mutate(total = B2B + B2C,
+         B2B = (B2B + 1) / sum(B2B + 1),
+         B2C = (B2C + 1) / sum(B2C + 1),
+         log_ratio = log2(B2C / B2B),
+         abs_ratio = abs(log_ratio)) %>%
+  arrange(desc(log_ratio))
+
+counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "B2B"', "More 'B2C'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(stories = reorder(stories, log_ratio)) %>%
+    ggplot(aes(stories, log_ratio, color = direction)) +
+    geom_segment(aes(x = stories, xend = stories, y = 0, yend = log_ratio)) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "Relative likelihood of creating Instagram stories") +
+    scale_color_discrete(name = "", labels = c("More 'B2C'", "More 'B2B'")) +
+    scale_y_continuous(breaks = seq(-0.5, 0.5, 0.25),
+                       labels = c("1.5X", "1.25X", "Same", "1.25X", "1.5X"))
+```
+
+### Likelihood of having documented social media strategy
+
+```{r echo = FALSE}
+responses %>% 
+  select(q4, q5) %>% 
+  group_by(q4, q5) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(q4 != '' & q5 != '' & q5 == "Yes") %>% 
+  ungroup() %>% 
+  mutate(q4 = reorder(q4, percent)) %>% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Has Documented Social Media Strategy")
+```
+
+```{r echo = FALSE}
+strategy <- responses %>% 
+  select(q4, q5) %>% 
+  rename(strategy = q5) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & strategy != '')
+
+# calculate log ratios for the network counts
+counts <- strategy %>%
+  count(q4, strategy) %>%
+  spread(q4, n, fill = 0) %>%
+  mutate(total = B2B + B2C,
+         B2B = (B2B + 1) / sum(B2B + 1),
+         B2C = (B2C + 1) / sum(B2C + 1),
+         log_ratio = log2(B2C / B2B),
+         abs_ratio = abs(log_ratio)) %>%
+  arrange(desc(log_ratio))
+
+counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "B2B"', "More 'B2C'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(strategy = reorder(strategy, log_ratio)) %>%
+    ggplot(aes(strategy, log_ratio, color = direction)) +
+    geom_segment(aes(x = strategy, xend = strategy, y = 0, yend = log_ratio)) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "Relative likelihood of having documented social strategy") +
+    scale_color_discrete(name = "", labels = c("More 'B2C'", "More 'B2B'")) +
+    scale_y_continuous(breaks = seq(-0.5, 0.5, 0.25),
+                       labels = c("1.5X", "1.25X", "Same", "1.25X", "1.5X"))
+```
+
+### Measuring ROI
+
+```{r}
+roi <- responses %>% 
+  select(q4, q74) %>% 
+  rename(roi = q74) %>% 
+  filter((q4 == 'B2B' | q4 == 'B2C') & roi != '')
+
+engagement_rows <- grep("Engagement", roi$roi)
+roi[engagement_rows, ]$roi <- "Engagement"
+
+# calculate log ratios for the network counts
+counts <- roi %>%
+  count(q4, roi) %>%
+  spread(q4, n, fill = 0) %>%
+  mutate(total = B2B + B2C,
+         B2B = (B2B + 1) / sum(B2B + 1),
+         B2C = (B2C + 1) / sum(B2C + 1),
+         log_ratio = log2(B2C / B2B),
+         abs_ratio = abs(log_ratio)) %>%
+  arrange(desc(log_ratio))
+
+counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "B2B"', "More 'B2C'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(roi = reorder(roi, log_ratio)) %>%
+    ggplot(aes(roi, log_ratio, color = direction)) +
+    geom_segment(aes(x = roi, xend = roi, y = 0, yend = log_ratio)) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "Relative likelihood of ROI measurement",
+         subtitle = "For social media advertising") +
+    scale_color_discrete(name = "", labels = c("More 'B2C'", "More 'B2B'")) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c("8X", "4X", "2X", "Same", "2X", "4X", "8X"))
+```
+
+### Company size and most important networks
+We'll first determine if a company is considered small or large. 
+
+```{r}
+# categorize company size
+responses <- responses %>% 
+  mutate(size = ifelse(q2 == "", NA,
+                ifelse(q2 == "Just me", "small",
+                ifelse(q2 == "Fewer than 10", "small",
+                ifelse(q2 == "11-25", "small",
+                ifelse(q2 == "26-50", "small", "large"))))))
+
+table(responses$size)
+```
+
+Now let's repeat what we've done above.
+
+```{r echo = FALSE}
+facebook <- responses %>% 
+  select(size, q14:q21) %>% 
+  group_by(size, q14) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(size != '' & q14 != '') %>% 
+  ungroup() %>% 
+  mutate(size = reorder(size, percent)) %>% 
+  ggplot(aes(x = size, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#3B5998') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Facebook")
+
+twitter <- responses %>% 
+  select(size, q15:q21) %>% 
+  group_by(size, q15) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(size != '' & q15 != '') %>% 
+  ungroup() %>% 
+  mutate(size = reorder(size, percent)) %>% 
+  ggplot(aes(x = size, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#1DA1F2') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Twitter")
+
+instagram <- responses %>% 
+  select(size, q16:q21) %>% 
+  group_by(size, q16) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(size != '' & q16 != '') %>% 
+  ungroup() %>% 
+  mutate(size = reorder(size, percent)) %>% 
+  ggplot(aes(x = size, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#222222') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Instagram")
+
+linkedin <- responses %>% 
+  select(size, q17:q21) %>% 
+  group_by(size, q17) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(size != '' & q17 != '') %>% 
+  ungroup() %>% 
+  mutate(size = reorder(size, percent)) %>% 
+  ggplot(aes(x = size, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#0077B5') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Linkedin")
+
+google <- responses %>% 
+  select(size, q18:q21) %>% 
+  group_by(size, q18) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(size != '' & q18 != '') %>% 
+  ungroup() %>% 
+  mutate(size = reorder(size, percent)) %>% 
+  ggplot(aes(x = size, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#DB4437') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Google+")
+
+snapchat <- responses %>% 
+  select(size, q19:q21) %>% 
+  group_by(size, q19) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(size != '' & q19 != '') %>% 
+  ungroup() %>% 
+  mutate(size = reorder(size, percent)) %>% 
+  ggplot(aes(x = size, y = percent)) + 
+  geom_bar(stat = 'identity', fill = 'orange') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Snapchat")
+
+pinterest <- responses %>% 
+  select(size, q20:q21) %>% 
+  group_by(size, q20) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(size != '' & q20 != '') %>% 
+  ungroup() %>% 
+  mutate(size = reorder(size, percent)) %>% 
+  ggplot(aes(x = size, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#BD081C') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Pinterest")
+
+youtube <- responses %>% 
+  select(size, q21:q21) %>% 
+  group_by(size, q21) %>%
+  summarise(respondents = n()) %>% 
+  mutate(percent = respondents / sum(respondents)) %>% 
+  filter(size != '' & q21 != '') %>% 
+  ungroup() %>% 
+  mutate(size = reorder(size, percent)) %>% 
+  ggplot(aes(x = size, y = percent)) + 
+  geom_bar(stat = 'identity', fill = '#cc181e') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Youtube")
+
+grid.arrange(facebook, twitter, linkedin,
+             instagram, google, snapchat, 
+             pinterest, youtube, ncol = 2)
+```
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# get counts for business type
+fb <- responses %>% 
+  select(size, q14) %>% 
+  rename(network = q14) %>% 
+  filter(network == 'Facebook')
+
+twitter <- responses %>% 
+  select(size, q15) %>% 
+  rename(network = q15) %>% 
+  filter(network == 'Twitter')
+
+ig <- responses %>% 
+  select(size, q16) %>% 
+  rename(network = q16) %>% 
+  filter(network == 'Instagram')
+
+li <- responses %>% 
+  select(size, q17) %>% 
+  rename(network = q17) %>% 
+  filter(network == 'LinkedIn')
+
+google <- responses %>% 
+  select(size, q18) %>% 
+  rename(network = q18) %>% 
+  filter(network == 'Google+')
+
+snap <- responses %>% 
+  select(size, q19) %>% 
+  rename(network = q19) %>% 
+  filter(network == 'Snapchat')
+
+pin <- responses %>% 
+  select(size, q20) %>% 
+  rename(network = q20) %>% 
+  filter(network == 'Pinterest')
+
+youtube <- responses %>% 
+  select(size, q21) %>% 
+  rename(network = q21) %>% 
+  filter(network == 'YouTube')
+
+by_type <- fb %>% 
+  bind_rows(twitter) %>% 
+  bind_rows(ig) %>% 
+  bind_rows(li) %>% 
+  bind_rows(google) %>% 
+  bind_rows(snap) %>% 
+  bind_rows(pin) %>% 
+  bind_rows(youtube)
+
+# calculate log ratios for the network counts
+network_counts <- by_type %>%
+  count(size, network) %>%
+  spread(size, n, fill = 0) %>%
+  mutate(total = small + large,
+         small = (small) / sum(small + 1),
+         large = (large + 1) / sum(large + 1),
+         log_ratio = log2(small / large),
+         abs_ratio = abs(log_ratio)) %>%
+  arrange(desc(log_ratio))
+
+network_counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "small"', "More 'large'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(network = reorder(network, log_ratio)) %>%
+    ggplot(aes(network, log_ratio, color = direction)) +
+    geom_segment(aes(x = network, xend = network,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "Most Important Networks for Small and Large Companies") +
+    scale_color_discrete(name = "", labels = c("More 'small'", "More 'large'")) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c("8X", "4X", "2X", 
+                                  "Same", "2X", "4X", "8X"))
+```
+
+```{r echo = FALSE}
+network_counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "B2B"', "More 'B2C'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(network = reorder(network, log_ratio)) %>%
+    ggplot(aes(network, log_ratio, color = direction)) +
+    geom_segment(aes(x = network, xend = network,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "Most Important Networks for B2B and B2C Companies") +
+    scale_color_discrete(name = "", labels = c("More 'B2C'", "More 'B2B'")) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c("8X", "4X", "2X", 
+                                  "Same", "2X", "4X", "8X"))
+```
+
+### Do large businesses publish videos more frequently?
+To answer this question, we'll need to determine if a business is small or large. We'll define a _small_ business as one that has between one and fifty employees. We'll categorize any businesses with over 50 employees as a _large_ business.
+
+```{r}
+# categorize company size
+responses <- responses %>% 
+  mutate(size = ifelse(q2 == "", NA,
+                ifelse(q2 == "Just me", "small",
+                ifelse(q2 == "Fewer than 10", "small",
+                ifelse(q2 == "11-25", "small",
+                ifelse(q2 == "26-50", "small", "large"))))))
+
+table(responses$size)
+```
+
+The question regarding video posting frequency is question number 25 in our dataframe. Let's review the distribution of responses for both small and large businesses.
+
+```{r warning = FALSE, message = FALSE}
+library(gridExtra)
+
+# small business plot
+small <- responses %>% 
+  filter(q25 != '' & size == 'small') %>% 
+  group_by(q25) %>% 
+  summarise(n = n_distinct(user_id)) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(q25 = reorder(q25, n)) %>% 
+  ggplot(aes(x = q25, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Frequency of Video Uploads",
+       subtitle = "For Small Businesses (1-50 employees)")
+
+# large business plot
+large <- responses %>% 
+  filter(q25 != '' & size == 'large') %>% 
+  group_by(q25) %>% 
+  summarise(n = n_distinct(user_id)) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(q25 = reorder(q25, n)) %>% 
+  ggplot(aes(x = q25, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Frequency of Video Uploads",
+       subtitle = "For Large Businesses (50+ employees)")
+
+# plot two plots together
+grid.arrange(small, large, nrow = 1)
+```
+
+Now we can calculate log ratios to determine if large businesses are more or less likely to publish videos at any frequency.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+# calculate log ratios for the network counts
+counts <- responses %>%
+  filter(q25 != '') %>% 
+  count(size, q25) %>%
+  spread(size, n, fill = 0) %>%
+  mutate(total = small + large,
+         small = (small) / sum(small + 1),
+         large = (large + 1) / sum(large + 1),
+         log_ratio = log2(small / large),
+         abs_ratio = abs(log_ratio)) %>%
+  arrange(desc(log_ratio))
+
+# plot the ratios
+counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "small"', "More 'large'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(q25 = reorder(q25, log_ratio)) %>%
+    ggplot(aes(q25, log_ratio, color = direction)) +
+    geom_segment(aes(x = q25, xend = q25,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "Video Creation Frequencies",
+         subtitle = "For Small and Large Businesses") +
+    scale_color_discrete(name = "", labels = c("More 'small'", "More 'large'")) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c("8X", "4X", "2X", 
+                                  "Same", "2X", "4X", "8X"))
+```
+
+So, it looks like "small" businesses that responded to our survey were more than twice as likely to never create video content than "large" businesses that responded.
+
+### Are large companies more likely to have a documented social media strategy?
+Let's take the same approach here, except group on question 5 instead of question 25.
+
+```{r warning = FALSE, message = FALSE}
+# small business plot
+small <- responses %>% 
+  filter(q5 != '' & size == 'small') %>% 
+  group_by(q5) %>% 
+  summarise(n = n_distinct(user_id)) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(q5 = reorder(q5, n)) %>% 
+  ggplot(aes(x = q5, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Has Documented Social Media Strategy",
+       subtitle = "Small Businesses (1-50 employees)")
+
+# large business plot
+large <- responses %>% 
+  filter(q5 != '' & size == 'large') %>% 
+  group_by(q5) %>% 
+  summarise(n = n_distinct(user_id)) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(q5 = reorder(q5, n)) %>% 
+  ggplot(aes(x = q5, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "",
+       subtitle = "Large Businesses (50+ employees)")
+
+# plot two plots together
+grid.arrange(small, large, nrow = 1)
+```
+
+Now let's plot the log ratios.
+
+```{r}
+# calculate log ratios for the network counts
+counts <- responses %>%
+  filter(q5 != '') %>% 
+  count(size, q5) %>%
+  spread(size, n, fill = 0) %>%
+  mutate(total = small + large,
+         small = (small) / sum(small + 1),
+         large = (large + 1) / sum(large + 1),
+         log_ratio = log2(small / large),
+         abs_ratio = abs(log_ratio)) %>%
+  arrange(desc(log_ratio))
+
+# plot the ratios
+counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "small"', "More 'large'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(q5 = reorder(q5, log_ratio)) %>%
+    ggplot(aes(q5, log_ratio, color = direction)) +
+    geom_segment(aes(x = q5, xend = q5,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "Has Documented Social Media Strategy",
+         subtitle = "For Small and Large Businesses") +
+    scale_color_discrete(name = "", labels = c("More 'small'", "More 'large'")) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c("8X", "4X", "2X", 
+                                  "Same", "2X", "4X", "8X"))
+```
+
+It looks like large businesses are slightly more likely to have a documented social media strategy.
+
+### What factors are holding small businesses back from creating video content?
+We'll use the same approach as in the previous two questions. The question numbers are 32-38. This will take some data tidying first. We'll need to count the number of users that reqponded to each question and bind them into a single data frame.
+
+```{r}
+# get counts for each response
+dont_post <- responses %>% 
+  select(size, q32) %>% 
+  rename(reason = q32) %>% 
+  filter(reason == "We don't post video content")
+
+other <- responses %>% 
+  select(size, q33) %>% 
+  rename(reason = q33) %>% 
+  filter(reason == "Other")
+
+time <- responses %>% 
+  select(size, q34) %>% 
+  rename(reason = q34) %>% 
+  filter(reason == "Lack of time")
+
+budget <- responses %>% 
+  select(size, q35) %>% 
+  rename(reason = q35) %>% 
+  filter(reason == "No budget to produce video")
+
+film <- responses %>% 
+  select(size, q36) %>% 
+  rename(reason = q36) %>% 
+  filter(reason == 'Not sure how to film/edit')
+
+what <- responses %>% 
+  select(size, q37) %>% 
+  rename(reason = q37) %>% 
+  filter(reason == 'Not sure what video to create')
+
+by_reason <- dont_post %>% 
+  bind_rows(other) %>% 
+  bind_rows(time) %>% 
+  bind_rows(budget) %>% 
+  bind_rows(film) %>% 
+  bind_rows(what)
+
+# calculate log ratios for the network counts
+counts <- by_reason %>%
+  count(size, reason) %>%
+  spread(size, n, fill = 0) %>%
+  mutate(total = small + large,
+         small = (small) / sum(small + 1),
+         large = (large + 1) / sum(large + 1),
+         log_ratio = log2(small / large),
+         abs_ratio = abs(log_ratio)) %>%
+  arrange(desc(log_ratio))
+
+# plot log ratios
+counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "small"', "More 'large'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(reason = reorder(reason, log_ratio)) %>%
+    ggplot(aes(reason, log_ratio, color = direction)) +
+    geom_segment(aes(x = reason, xend = reason,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "Why Companies Don't Create More Video Content") +
+    scale_color_discrete(name = "", labels = c("More 'small'", "More 'large'")) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c("8X", "4X", "2X", 
+                                  "Same", "2X", "4X", "8X"))
+```
+
+### Measuring ROI
+Let's take the same approach to see if there is any difference in how small and large companies measure ROI.
+
+```{r warning = FALSE, message = FALSE}
+# small business plot
+small <- responses %>% 
+  filter(q74 != '' & size == 'small') %>% 
+  group_by(q74) %>% 
+  summarise(n = n_distinct(user_id)) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(q74 = reorder(q74, n)) %>% 
+  ggplot(aes(x = q74, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "How Social Media ROI is Measured",
+       subtitle = "Small Businesses (1-50 employees)")
+
+# large business plot
+large <- responses %>% 
+  filter(q74 != '' & size == 'large') %>% 
+  group_by(q74) %>% 
+  summarise(n = n_distinct(user_id)) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(q74 = reorder(q74, n)) %>% 
+  ggplot(aes(x = q74, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "",
+       subtitle = "Large Businesses (50+ employees)")
+
+# plot two plots together
+grid.arrange(small, large, nrow = 1)
+```
+
+Now let's plot the log ratios.
+
+```{r}
+roi <- responses %>% 
+  select(size, q74) %>% 
+  filter(q74 != '') %>%
+  mutate(q74 = as.character(q74))
+
+engagement_rows <- grep("Engagement", roi$q74)
+roi[engagement_rows, ]$q74 <- "Engagement"
+
+# calculate log ratios for the counts
+counts <- roi %>%
+  filter(q74 != '') %>% 
+  count(size, q74) %>%
+  spread(size, n, fill = 0) %>%
+  mutate(total = small + large,
+         small = (small) / sum(small + 1),
+         large = (large + 1) / sum(large + 1),
+         log_ratio = log2(small / large),
+         abs_ratio = abs(log_ratio)) %>%
+  arrange(desc(log_ratio))
+
+# plot the ratios
+counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "small"', "More 'large'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(q74 = reorder(q74, log_ratio)) %>%
+    ggplot(aes(q74, log_ratio, color = direction)) +
+    geom_segment(aes(x = q74, xend = q74,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "How ROI is Measured",
+         subtitle = "For Small and Large Businesses") +
+    scale_color_discrete(name = "", labels = c("More 'small'", "More 'large'")) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c("8X", "4X", "2X", 
+                                  "Same", "2X", "4X", "8X"))
+```
+
+### Do people that invest in social media ads see social media marketing as more effective?
+People answered questions 66 through 71 with networks in which they've invested money in paid advertising. We'll need to get the user_ids of each person that has invested in _at least one_ of the networks.
+
+```{r warning = FALSE, message = FALSE}
+# get counts for each network
+fb <- responses %>% 
+  select(user_id, q66) %>% 
+  rename(network = q66) %>% 
+  filter(network == 'Facebook')
+
+twitter <- responses %>% 
+  select(user_id, q69) %>% 
+  rename(network = q69) %>% 
+  filter(network == 'Twitter')
+
+ig <- responses %>% 
+  select(user_id, q67) %>% 
+  rename(network = q67) %>% 
+  filter(network == 'Instagram')
+
+li <- responses %>% 
+  select(user_id, q70) %>% 
+  rename(network = q70) %>% 
+  filter(network == 'LinkedIn')
+
+snap <- responses %>% 
+  select(user_id, q68) %>% 
+  rename(network = q68) %>% 
+  filter(network == 'Snapchat')
+
+youtube <- responses %>% 
+  select(user_id, q71) %>% 
+  rename(network = q71) %>% 
+  filter(network == 'YouTube')
+
+# bind all responses together
+all_networks <- fb %>% 
+  bind_rows(ig) %>% 
+  bind_rows(twitter) %>% 
+  bind_rows(li) %>% 
+  bind_rows(snap) %>% 
+  bind_rows(youtube)
+
+# determine if user has invested in ads
+responses <- responses %>% 
+  mutate(has_run_ads = user_id %in% all_networks$user_id)
+```
+
+Now let's see if these users responded any differently to the question about how effective social media marketing is.
+
+```{r echo = FALSE}
+# calculate log ratios for the counts
+counts <- responses %>%
+  filter(q76 != '') %>% 
+  count(has_run_ads, q76) %>%
+  spread(has_run_ads, n, fill = 0) %>%
+  mutate(total = `FALSE` + `TRUE`,
+         `FALSE` = (`FALSE`) / sum(`FALSE` + 1),
+         `TRUE` = (`TRUE` + 1) / sum(`TRUE` + 1),
+         log_ratio = log2(`FALSE` / `TRUE`),
+         abs_ratio = abs(log_ratio)) %>%
+  arrange(desc(log_ratio))
+
+# plot the ratios
+counts %>%
+    group_by(direction = ifelse(log_ratio < 0, 'More "FALSE"', "More 'TRUE'")) %>%
+    top_n(15, abs_ratio) %>%
+    ungroup() %>%
+    mutate(q76 = reorder(q76, log_ratio)) %>%
+    ggplot(aes(q76, log_ratio, color = direction)) +
+    geom_segment(aes(x = q76, xend = q76,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = "Effecacy of Social Media Marketing",
+         subtitle = "For Small and Large Businesses") +
+    scale_color_discrete(name = "", labels = c("Has Not Run Ads", "Has Run Ads")) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c("8X", "4X", "2X", 
+                                  "Same", "2X", "4X", "8X"))
+```
+
+Pretty cool!
+
+```{r}
+responses %>% 
+  group_by(has_run_ads, q76) %>% 
+  summarise(users = n_distinct(user_id)) %>% 
+  mutate(percent = users / sum(users))
+```
+

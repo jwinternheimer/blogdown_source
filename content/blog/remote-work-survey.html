@@ -1,0 +1,544 @@
+---
+date: 2017-12-19T09:57:02-05:00
+subtitle: ""
+tags: []
+type: "post"
+title: "The State of Social Media"
+---
+
+
+
+<p>Towards the end of 2017, Buffer sent out a survey to gauge the state of social media going into 2018. We had over 1700 responses, which we downloaded as a csv file and stored as an R data object. The questions and responses can be viewed <a href="https://buffersurvey.typeform.com/report/GjSFVB/HfeZpvRiBKZDRH7a">here</a>.</p>
+<p>The survey consisted of 30 questions about how users use social media.</p>
+<pre class="r"><code># get response data
+responses &lt;- readRDS(&#39;state-of-social.rds&#39;)</code></pre>
+<p>The data is quite messy and untidy. Let’s begin by addressing the column names. We can use the <code>safe_names()</code> function in the <code>buffer</code> package to take care of uppercase letters and periods in the column names.</p>
+<pre class="r"><code># clean up column names
+colnames(responses) &lt;- safe_names(colnames(responses))</code></pre>
+<p>The column names in the dataframe are just the questions. These are too long to work with efficiently, so we’ll replace them with question numbers <code>q1</code> through <code>q87</code>. You might wonder why there are 88 columns in our dataframe. We have so many columns because some of the questions in the survey allow for multiple responses.</p>
+<p>For example, the question “Which of the following channels does your business use currently?” could be answered with any combination of social networks, e.g. Facebook, Facebook and Snapchat, Linkedin and Twitter and Facebook, etc. This survey question can be broken apart into eight individual questions corresponding to each social network. The question really asks “does your business use Facebook?”, “does your business use Twitter?”, “does your business use Pinterest?”, etc.</p>
+<p>Now, let’s create a lookup table that will help us reference the worded question for each question number.</p>
+<pre class="r"><code># create lookup table for questions
+questions &lt;- data_frame(number = character(87), question = character(87))
+
+# set the question numbers
+questions$number &lt;- paste0(&#39;q&#39;, seq(1:87))
+
+# set the worded questions
+questions$question &lt;- colnames(select(responses, -x_))</code></pre>
+<p>Nice, now we’ll be able to look up the question for each question number. Let’s replace the column names in our <code>responses</code> dataframe.</p>
+<pre class="r"><code># set column names
+column_names &lt;- c(&#39;user_id&#39;, questions$number)
+
+# replace column names
+colnames(responses) &lt;- column_names</code></pre>
+<p>Alright, I think we’re ready for some exploratory analysis!</p>
+<div id="exploratory-analysis" class="section level3">
+<h3>Exploratory analysis</h3>
+<p>The first few questions we ask are about the companies the respondents work for. We ask about their industries, size, and social media profiles. Let’s plot a few histograms to see what some common combinations are.</p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>We can see that over 400 respondents work in marketing, PR, or advertising. They represent around 23% of all respondents. Media and publishing, non-profits, consumer products, and education make up another 37% of respodents.</p>
+<p>Let’s take a look at the sizes of these commpanies.</p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>Most of the respondents worked for small companies. The most common response company size was just a single person! Let’s explore the relationship between the two.</p>
+<pre class="r"><code>table(responses$q1, responses$q2)</code></pre>
+<pre><code>##                              
+##                                   1,001+ 101-200 11-25 201-500 26-50
+##                                 4      0       0     0       0     0
+##   Consumer products             1     19       7    14       9    10
+##   Ecommerce                     0      2       4     8       2     6
+##   Education                     2     23      11     7      19     4
+##   Financial Services            0     13       5     8       3     8
+##   Government                    0     12       7     6       5     1
+##   IT and Services               0     12       3    17       7     8
+##   Law and Legal Services        0      3       0     4       0     2
+##   Marketing, PR, Advertising    0      8       9    59       8    29
+##   Media and Publishing          1      9       7    18       4    12
+##   Medical and Healthcare        0     13       2     7       4     5
+##   Non-profit                    1      6      17    32       7    26
+##   Other                         2     20      22    30      12    18
+##   Software                      1      5       8    13       7    12
+##   Travel and Tourism            0      3       4     1       5     3
+##                              
+##                               501-1,000 51-100 Fewer than 10 Just me
+##                                       0      0             0       1
+##   Consumer products                  10     11            35      29
+##   Ecommerce                           2      5            15      18
+##   Education                           9     12            28      21
+##   Financial Services                  1      5             5       7
+##   Government                          3      0             0       1
+##   IT and Services                     9      6            25      15
+##   Law and Legal Services              2      2             2       1
+##   Marketing, PR, Advertising          5     16           130     154
+##   Media and Publishing                7     10            46      80
+##   Medical and Healthcare              2      7             8       9
+##   Non-profit                          5     18            41      24
+##   Other                              11     17            54      79
+##   Software                            4     11            17       3
+##   Travel and Tourism                  2      1            14       6</code></pre>
+<p>We can see that the most common responses are Marketing, PR, and Advertising companies with fewer than 10 employees, including single employees.</p>
+<p>We can plot the combinations with at least 25 respondents.</p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>We can see that only a few of the most popular combinations have a team size over 10. Now let’s try to answer a few specific questions.</p>
+</div>
+<div id="which-social-media-network-is-the-highest-priority-for-b2c-and-b2b-businesses" class="section level3">
+<h3>Which social media network is the highest priority for B2C and B2B businesses?</h3>
+<p>In question four, we asked whether the respondents’ companies were business-to-business (B2B) or business-to-consumer (B2C). Questions 14 through 21 correspond to the responses of the question “Which of the following channels are the highest priority for your business?”</p>
+<p>We can try to determine if there are any significant differences in priorities for B2B and B2C companies. We treat the answers to questions 14 through 21 as individual responses, even though they are in fact responses to a single question (question number 7 in the original Typeform survey).</p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+</div>
+<div id="are-b2b-companies-more-likely-to-create-instagram-strategy" class="section level3">
+<h3>Are B2B companies more likely to create Instagram strategy?</h3>
+<pre class="r"><code>responses %&gt;% 
+  select(q4, q23) %&gt;% 
+  group_by(q4, q23) %&gt;%
+  summarise(respondents = n()) %&gt;% 
+  mutate(percent = respondents / sum(respondents)) %&gt;% 
+  filter(q4 != &#39;&#39; &amp; q23 != &#39;&#39; &amp; q23 == &quot;Yes&quot;) %&gt;% 
+  ungroup() %&gt;% 
+  mutate(q4 = reorder(q4, percent)) %&gt;% 
+  ggplot(aes(x = q4, y = percent)) + 
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;Instagram strategy&quot;,
+       subtitle = &quot;Percentage of companies that created a story in 2017&quot;)</code></pre>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
+</div>
+<div id="likelihood-of-having-documented-social-media-strategy" class="section level3">
+<h3>Likelihood of having documented social media strategy</h3>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+</div>
+<div id="measuring-roi" class="section level3">
+<h3>Measuring ROI</h3>
+<pre class="r"><code>roi &lt;- responses %&gt;% 
+  select(q4, q74) %&gt;% 
+  rename(roi = q74) %&gt;% 
+  filter((q4 == &#39;B2B&#39; | q4 == &#39;B2C&#39;) &amp; roi != &#39;&#39;)
+
+engagement_rows &lt;- grep(&quot;Engagement&quot;, roi$roi)
+roi[engagement_rows, ]$roi &lt;- &quot;Engagement&quot;</code></pre>
+<pre><code>## Warning in `[&lt;-.factor`(`*tmp*`, iseq, value = c(&quot;Engagement&quot;,
+## &quot;Engagement&quot;, : invalid factor level, NA generated</code></pre>
+<pre class="r"><code># calculate log ratios for the network counts
+counts &lt;- roi %&gt;%
+  count(q4, roi) %&gt;%
+  spread(q4, n, fill = 0) %&gt;%
+  mutate(total = B2B + B2C,
+         B2B = (B2B + 1) / sum(B2B + 1),
+         B2C = (B2C + 1) / sum(B2C + 1),
+         log_ratio = log2(B2C / B2B),
+         abs_ratio = abs(log_ratio)) %&gt;%
+  arrange(desc(log_ratio))
+
+counts %&gt;%
+    group_by(direction = ifelse(log_ratio &lt; 0, &#39;More &quot;B2B&quot;&#39;, &quot;More &#39;B2C&#39;&quot;)) %&gt;%
+    top_n(15, abs_ratio) %&gt;%
+    ungroup() %&gt;%
+    mutate(roi = reorder(roi, log_ratio)) %&gt;%
+    ggplot(aes(roi, log_ratio, color = direction)) +
+    geom_segment(aes(x = roi, xend = roi, y = 0, yend = log_ratio)) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = &quot;Relative likelihood of ROI measurement&quot;,
+         subtitle = &quot;For social media advertising&quot;) +
+    scale_color_discrete(name = &quot;&quot;, labels = c(&quot;More &#39;B2C&#39;&quot;, &quot;More &#39;B2B&#39;&quot;)) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c(&quot;8X&quot;, &quot;4X&quot;, &quot;2X&quot;, &quot;Same&quot;, &quot;2X&quot;, &quot;4X&quot;, &quot;8X&quot;))</code></pre>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+</div>
+<div id="company-size-and-most-important-networks" class="section level3">
+<h3>Company size and most important networks</h3>
+<p>We’ll first determine if a company is considered small or large.</p>
+<pre class="r"><code># categorize company size
+responses &lt;- responses %&gt;% 
+  mutate(size = ifelse(q2 == &quot;&quot;, NA,
+                ifelse(q2 == &quot;Just me&quot;, &quot;small&quot;,
+                ifelse(q2 == &quot;Fewer than 10&quot;, &quot;small&quot;,
+                ifelse(q2 == &quot;11-25&quot;, &quot;small&quot;,
+                ifelse(q2 == &quot;26-50&quot;, &quot;small&quot;, &quot;large&quot;))))))
+
+table(responses$size)</code></pre>
+<pre><code>## 
+## large small 
+##   539  1236</code></pre>
+<p>Now let’s repeat what we’ve done above.</p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-20-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-21-1.png" width="672" /></p>
+</div>
+<div id="do-large-businesses-publish-videos-more-frequently" class="section level3">
+<h3>Do large businesses publish videos more frequently?</h3>
+<p>To answer this question, we’ll need to determine if a business is small or large. We’ll define a <em>small</em> business as one that has between one and fifty employees. We’ll categorize any businesses with over 50 employees as a <em>large</em> business.</p>
+<pre class="r"><code># categorize company size
+responses &lt;- responses %&gt;% 
+  mutate(size = ifelse(q2 == &quot;&quot;, NA,
+                ifelse(q2 == &quot;Just me&quot;, &quot;small&quot;,
+                ifelse(q2 == &quot;Fewer than 10&quot;, &quot;small&quot;,
+                ifelse(q2 == &quot;11-25&quot;, &quot;small&quot;,
+                ifelse(q2 == &quot;26-50&quot;, &quot;small&quot;, &quot;large&quot;))))))
+
+table(responses$size)</code></pre>
+<pre><code>## 
+## large small 
+##   539  1236</code></pre>
+<p>The question regarding video posting frequency is question number 25 in our dataframe. Let’s review the distribution of responses for both small and large businesses.</p>
+<pre class="r"><code>library(gridExtra)
+
+# small business plot
+small &lt;- responses %&gt;% 
+  filter(q25 != &#39;&#39; &amp; size == &#39;small&#39;) %&gt;% 
+  group_by(q25) %&gt;% 
+  summarise(n = n_distinct(user_id)) %&gt;% 
+  mutate(percent = n / sum(n)) %&gt;% 
+  mutate(q25 = reorder(q25, n)) %&gt;% 
+  ggplot(aes(x = q25, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;Frequency of Video Uploads&quot;,
+       subtitle = &quot;For Small Businesses (1-50 employees)&quot;)
+
+# large business plot
+large &lt;- responses %&gt;% 
+  filter(q25 != &#39;&#39; &amp; size == &#39;large&#39;) %&gt;% 
+  group_by(q25) %&gt;% 
+  summarise(n = n_distinct(user_id)) %&gt;% 
+  mutate(percent = n / sum(n)) %&gt;% 
+  mutate(q25 = reorder(q25, n)) %&gt;% 
+  ggplot(aes(x = q25, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;Frequency of Video Uploads&quot;,
+       subtitle = &quot;For Large Businesses (50+ employees)&quot;)
+
+# plot two plots together
+grid.arrange(small, large, nrow = 1)</code></pre>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-23-1.png" width="672" /></p>
+<p>Now we can calculate log ratios to determine if large businesses are more or less likely to publish videos at any frequency.</p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-24-1.png" width="672" /></p>
+<p>So, it looks like “small” businesses that responded to our survey were more than twice as likely to never create video content than “large” businesses that responded.</p>
+</div>
+<div id="are-large-companies-more-likely-to-have-a-documented-social-media-strategy" class="section level3">
+<h3>Are large companies more likely to have a documented social media strategy?</h3>
+<p>Let’s take the same approach here, except group on question 5 instead of question 25.</p>
+<pre class="r"><code># small business plot
+small &lt;- responses %&gt;% 
+  filter(q5 != &#39;&#39; &amp; size == &#39;small&#39;) %&gt;% 
+  group_by(q5) %&gt;% 
+  summarise(n = n_distinct(user_id)) %&gt;% 
+  mutate(percent = n / sum(n)) %&gt;% 
+  mutate(q5 = reorder(q5, n)) %&gt;% 
+  ggplot(aes(x = q5, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;Has Documented Social Media Strategy&quot;,
+       subtitle = &quot;Small Businesses (1-50 employees)&quot;)
+
+# large business plot
+large &lt;- responses %&gt;% 
+  filter(q5 != &#39;&#39; &amp; size == &#39;large&#39;) %&gt;% 
+  group_by(q5) %&gt;% 
+  summarise(n = n_distinct(user_id)) %&gt;% 
+  mutate(percent = n / sum(n)) %&gt;% 
+  mutate(q5 = reorder(q5, n)) %&gt;% 
+  ggplot(aes(x = q5, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;&quot;,
+       subtitle = &quot;Large Businesses (50+ employees)&quot;)
+
+# plot two plots together
+grid.arrange(small, large, nrow = 1)</code></pre>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-25-1.png" width="672" /></p>
+<p>Now let’s plot the log ratios.</p>
+<pre class="r"><code># calculate log ratios for the network counts
+counts &lt;- responses %&gt;%
+  filter(q5 != &#39;&#39;) %&gt;% 
+  count(size, q5) %&gt;%
+  spread(size, n, fill = 0) %&gt;%
+  mutate(total = small + large,
+         small = (small) / sum(small + 1),
+         large = (large + 1) / sum(large + 1),
+         log_ratio = log2(small / large),
+         abs_ratio = abs(log_ratio)) %&gt;%
+  arrange(desc(log_ratio))
+
+# plot the ratios
+counts %&gt;%
+    group_by(direction = ifelse(log_ratio &lt; 0, &#39;More &quot;small&quot;&#39;, &quot;More &#39;large&#39;&quot;)) %&gt;%
+    top_n(15, abs_ratio) %&gt;%
+    ungroup() %&gt;%
+    mutate(q5 = reorder(q5, log_ratio)) %&gt;%
+    ggplot(aes(q5, log_ratio, color = direction)) +
+    geom_segment(aes(x = q5, xend = q5,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = &quot;Has Documented Social Media Strategy&quot;,
+         subtitle = &quot;For Small and Large Businesses&quot;) +
+    scale_color_discrete(name = &quot;&quot;, labels = c(&quot;More &#39;small&#39;&quot;, &quot;More &#39;large&#39;&quot;)) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c(&quot;8X&quot;, &quot;4X&quot;, &quot;2X&quot;, 
+                                  &quot;Same&quot;, &quot;2X&quot;, &quot;4X&quot;, &quot;8X&quot;))</code></pre>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-26-1.png" width="672" /></p>
+<p>It looks like large businesses are slightly more likely to have a documented social media strategy.</p>
+</div>
+<div id="what-factors-are-holding-small-businesses-back-from-creating-video-content" class="section level3">
+<h3>What factors are holding small businesses back from creating video content?</h3>
+<p>We’ll use the same approach as in the previous two questions. The question numbers are 32-38. This will take some data tidying first. We’ll need to count the number of users that reqponded to each question and bind them into a single data frame.</p>
+<pre class="r"><code># get counts for each response
+dont_post &lt;- responses %&gt;% 
+  select(size, q32) %&gt;% 
+  rename(reason = q32) %&gt;% 
+  filter(reason == &quot;We don&#39;t post video content&quot;)
+
+other &lt;- responses %&gt;% 
+  select(size, q33) %&gt;% 
+  rename(reason = q33) %&gt;% 
+  filter(reason == &quot;Other&quot;)
+
+time &lt;- responses %&gt;% 
+  select(size, q34) %&gt;% 
+  rename(reason = q34) %&gt;% 
+  filter(reason == &quot;Lack of time&quot;)
+
+budget &lt;- responses %&gt;% 
+  select(size, q35) %&gt;% 
+  rename(reason = q35) %&gt;% 
+  filter(reason == &quot;No budget to produce video&quot;)
+
+film &lt;- responses %&gt;% 
+  select(size, q36) %&gt;% 
+  rename(reason = q36) %&gt;% 
+  filter(reason == &#39;Not sure how to film/edit&#39;)
+
+what &lt;- responses %&gt;% 
+  select(size, q37) %&gt;% 
+  rename(reason = q37) %&gt;% 
+  filter(reason == &#39;Not sure what video to create&#39;)
+
+by_reason &lt;- dont_post %&gt;% 
+  bind_rows(other) %&gt;% 
+  bind_rows(time) %&gt;% 
+  bind_rows(budget) %&gt;% 
+  bind_rows(film) %&gt;% 
+  bind_rows(what)</code></pre>
+<pre><code>## Warning in bind_rows_(x, .id): Unequal factor levels: coercing to character</code></pre>
+<pre><code>## Warning in bind_rows_(x, .id): binding character and factor vector,
+## coercing into character vector
+
+## Warning in bind_rows_(x, .id): binding character and factor vector,
+## coercing into character vector
+
+## Warning in bind_rows_(x, .id): binding character and factor vector,
+## coercing into character vector
+
+## Warning in bind_rows_(x, .id): binding character and factor vector,
+## coercing into character vector
+
+## Warning in bind_rows_(x, .id): binding character and factor vector,
+## coercing into character vector
+
+## Warning in bind_rows_(x, .id): binding character and factor vector,
+## coercing into character vector</code></pre>
+<pre class="r"><code># calculate log ratios for the network counts
+counts &lt;- by_reason %&gt;%
+  count(size, reason) %&gt;%
+  spread(size, n, fill = 0) %&gt;%
+  mutate(total = small + large,
+         small = (small) / sum(small + 1),
+         large = (large + 1) / sum(large + 1),
+         log_ratio = log2(small / large),
+         abs_ratio = abs(log_ratio)) %&gt;%
+  arrange(desc(log_ratio))
+
+# plot log ratios
+counts %&gt;%
+    group_by(direction = ifelse(log_ratio &lt; 0, &#39;More &quot;small&quot;&#39;, &quot;More &#39;large&#39;&quot;)) %&gt;%
+    top_n(15, abs_ratio) %&gt;%
+    ungroup() %&gt;%
+    mutate(reason = reorder(reason, log_ratio)) %&gt;%
+    ggplot(aes(reason, log_ratio, color = direction)) +
+    geom_segment(aes(x = reason, xend = reason,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = &quot;Why Companies Don&#39;t Create More Video Content&quot;) +
+    scale_color_discrete(name = &quot;&quot;, labels = c(&quot;More &#39;small&#39;&quot;, &quot;More &#39;large&#39;&quot;)) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c(&quot;8X&quot;, &quot;4X&quot;, &quot;2X&quot;, 
+                                  &quot;Same&quot;, &quot;2X&quot;, &quot;4X&quot;, &quot;8X&quot;))</code></pre>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-27-1.png" width="672" /></p>
+</div>
+<div id="measuring-roi-1" class="section level3">
+<h3>Measuring ROI</h3>
+<p>Let’s take the same approach to see if there is any difference in how small and large companies measure ROI.</p>
+<pre class="r"><code># small business plot
+small &lt;- responses %&gt;% 
+  filter(q74 != &#39;&#39; &amp; size == &#39;small&#39;) %&gt;% 
+  group_by(q74) %&gt;% 
+  summarise(n = n_distinct(user_id)) %&gt;% 
+  mutate(percent = n / sum(n)) %&gt;% 
+  mutate(q74 = reorder(q74, n)) %&gt;% 
+  ggplot(aes(x = q74, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;How Social Media ROI is Measured&quot;,
+       subtitle = &quot;Small Businesses (1-50 employees)&quot;)
+
+# large business plot
+large &lt;- responses %&gt;% 
+  filter(q74 != &#39;&#39; &amp; size == &#39;large&#39;) %&gt;% 
+  group_by(q74) %&gt;% 
+  summarise(n = n_distinct(user_id)) %&gt;% 
+  mutate(percent = n / sum(n)) %&gt;% 
+  mutate(q74 = reorder(q74, n)) %&gt;% 
+  ggplot(aes(x = q74, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;&quot;,
+       subtitle = &quot;Large Businesses (50+ employees)&quot;)
+
+# plot two plots together
+grid.arrange(small, large, nrow = 1)</code></pre>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-28-1.png" width="672" /></p>
+<p>Now let’s plot the log ratios.</p>
+<pre class="r"><code>roi &lt;- responses %&gt;% 
+  select(size, q74) %&gt;% 
+  filter(q74 != &#39;&#39;) %&gt;%
+  mutate(q74 = as.character(q74))
+
+engagement_rows &lt;- grep(&quot;Engagement&quot;, roi$q74)
+roi[engagement_rows, ]$q74 &lt;- &quot;Engagement&quot;
+
+# calculate log ratios for the counts
+counts &lt;- roi %&gt;%
+  filter(q74 != &#39;&#39;) %&gt;% 
+  count(size, q74) %&gt;%
+  spread(size, n, fill = 0) %&gt;%
+  mutate(total = small + large,
+         small = (small) / sum(small + 1),
+         large = (large + 1) / sum(large + 1),
+         log_ratio = log2(small / large),
+         abs_ratio = abs(log_ratio)) %&gt;%
+  arrange(desc(log_ratio))
+
+# plot the ratios
+counts %&gt;%
+    group_by(direction = ifelse(log_ratio &lt; 0, &#39;More &quot;small&quot;&#39;, &quot;More &#39;large&#39;&quot;)) %&gt;%
+    top_n(15, abs_ratio) %&gt;%
+    ungroup() %&gt;%
+    mutate(q74 = reorder(q74, log_ratio)) %&gt;%
+    ggplot(aes(q74, log_ratio, color = direction)) +
+    geom_segment(aes(x = q74, xend = q74,
+                     y = 0, yend = log_ratio), 
+                 size = 1.1, alpha = 0.6) +
+    geom_point(size = 3.5) +
+    coord_flip() +
+    theme_ipsum() +
+    labs(x = NULL, 
+         y = NULL,
+         title = &quot;How ROI is Measured&quot;,
+         subtitle = &quot;For Small and Large Businesses&quot;) +
+    scale_color_discrete(name = &quot;&quot;, labels = c(&quot;More &#39;small&#39;&quot;, &quot;More &#39;large&#39;&quot;)) +
+    scale_y_continuous(breaks = seq(-3, 3),
+                       labels = c(&quot;8X&quot;, &quot;4X&quot;, &quot;2X&quot;, 
+                                  &quot;Same&quot;, &quot;2X&quot;, &quot;4X&quot;, &quot;8X&quot;))</code></pre>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-29-1.png" width="672" /></p>
+</div>
+<div id="do-people-that-invest-in-social-media-ads-see-social-media-marketing-as-more-effective" class="section level3">
+<h3>Do people that invest in social media ads see social media marketing as more effective?</h3>
+<p>People answered questions 66 through 71 with networks in which they’ve invested money in paid advertising. We’ll need to get the user_ids of each person that has invested in <em>at least one</em> of the networks.</p>
+<pre class="r"><code># get counts for each network
+fb &lt;- responses %&gt;% 
+  select(user_id, q66) %&gt;% 
+  rename(network = q66) %&gt;% 
+  filter(network == &#39;Facebook&#39;)
+
+twitter &lt;- responses %&gt;% 
+  select(user_id, q69) %&gt;% 
+  rename(network = q69) %&gt;% 
+  filter(network == &#39;Twitter&#39;)
+
+ig &lt;- responses %&gt;% 
+  select(user_id, q67) %&gt;% 
+  rename(network = q67) %&gt;% 
+  filter(network == &#39;Instagram&#39;)
+
+li &lt;- responses %&gt;% 
+  select(user_id, q70) %&gt;% 
+  rename(network = q70) %&gt;% 
+  filter(network == &#39;LinkedIn&#39;)
+
+snap &lt;- responses %&gt;% 
+  select(user_id, q68) %&gt;% 
+  rename(network = q68) %&gt;% 
+  filter(network == &#39;Snapchat&#39;)
+
+youtube &lt;- responses %&gt;% 
+  select(user_id, q71) %&gt;% 
+  rename(network = q71) %&gt;% 
+  filter(network == &#39;YouTube&#39;)
+
+# bind all responses together
+all_networks &lt;- fb %&gt;% 
+  bind_rows(ig) %&gt;% 
+  bind_rows(twitter) %&gt;% 
+  bind_rows(li) %&gt;% 
+  bind_rows(snap) %&gt;% 
+  bind_rows(youtube)
+
+# determine if user has invested in ads
+responses &lt;- responses %&gt;% 
+  mutate(has_run_ads = user_id %in% all_networks$user_id)</code></pre>
+<p>Now let’s see if these users responded any differently to the question about how effective social media marketing is.</p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-31-1.png" width="672" /></p>
+<p>Pretty cool!</p>
+<pre class="r"><code>responses %&gt;% 
+  group_by(has_run_ads, q76) %&gt;% 
+  summarise(users = n_distinct(user_id)) %&gt;% 
+  mutate(percent = users / sum(users))</code></pre>
+<pre><code>## # A tibble: 12 x 4
+## # Groups:   has_run_ads [2]
+##    has_run_ads                  q76 users     percent
+##          &lt;lgl&gt;               &lt;fctr&gt; &lt;int&gt;       &lt;dbl&gt;
+##  1       FALSE                         24 0.068181818
+##  2       FALSE   Somewhat effective   134 0.380681818
+##  3       FALSE Somewhat ineffective    22 0.062500000
+##  4       FALSE            Uncertain   114 0.323863636
+##  5       FALSE       Very effective    45 0.127840909
+##  6       FALSE     Very ineffective    13 0.036931818
+##  7        TRUE                          5 0.003484321
+##  8        TRUE   Somewhat effective   664 0.462717770
+##  9        TRUE Somewhat ineffective    69 0.048083624
+## 10        TRUE            Uncertain   202 0.140766551
+## 11        TRUE       Very effective   469 0.326829268
+## 12        TRUE     Very ineffective    26 0.018118467</code></pre>
+</div>
