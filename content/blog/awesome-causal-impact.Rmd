@@ -10,9 +10,9 @@ title: "Effect of landing page and upgrade modal intervention on Awesome MRR"
 
  - Changes to the app and landing pages have led to a large (30%) and significant increase in Awesome trial starts.
  
- - The changes have not yet made any detectable effect on Awesome MRR, which still stagnates. 
+ - There are indications of a positive effect on Awesome MRR, but the probability of a true effect is inconclusive.
  
- - Awesome trialists still need time to convert and finish trials.
+ - The free plan experiment was a major confounding factor that did increase Awesome MRR.
  
 ### Background
 Back in September, Buffer experienced a period of relatively low [MRR growth](https://github.com/bufferapp/buffer-analysis/blob/master/deliverables/september_mrr_analysis.md). This was especially impactful for the Awesome plans, which saw a sharp and distinct decrease in growth. 
