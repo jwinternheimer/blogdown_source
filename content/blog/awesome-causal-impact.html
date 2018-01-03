@@ -12,8 +12,8 @@ title: "Effect of landing page and upgrade modal intervention on Awesome MRR"
 <h3>TL;DR</h3>
 <ul>
 <li><p>Changes to the app and landing pages have led to a large (30%) and significant increase in Awesome trial starts.</p></li>
-<li><p>The changes have not yet made any detectable effect on Awesome MRR, which still stagnates.</p></li>
-<li><p>Awesome trialists still need time to convert and finish trials.</p></li>
+<li><p>There are indications of a positive effect on Awesome MRR, but the probability of a true effect is inconclusive.</p></li>
+<li><p>The free plan experiment was a major confounding factor that did increase Awesome MRR.</p></li>
 </ul>
 </div>
 <div id="background" class="section level3">
@@ -66,13 +66,13 @@ summary(impact)</code></pre>
 ## 
 ##                          Average      Cumulative  
 ## Actual                   217          3689        
-## Prediction (s.d.)        167 (5.1)    2839 (85.9) 
-## 95% CI                   [157, 177]   [2673, 3009]
+## Prediction (s.d.)        167 (4.9)    2839 (83.6) 
+## 95% CI                   [157, 176]   [2671, 2999]
 ##                                                   
-## Absolute effect (s.d.)   50 (5.1)     850 (85.9)  
-## 95% CI                   [40, 60]     [680, 1016] 
+## Absolute effect (s.d.)   50 (4.9)     850 (83.6)  
+## 95% CI                   [41, 60]     [690, 1018] 
 ##                                                   
-## Relative effect (s.d.)   30% (3%)     30% (3%)    
+## Relative effect (s.d.)   30% (2.9%)   30% (2.9%)  
 ## 95% CI                   [24%, 36%]   [24%, 36%]  
 ## 
 ## Posterior tail-area probability p:   2e-04
@@ -125,16 +125,16 @@ summary(mrr_impact)</code></pre>
 ## 
 ##                          Average              Cumulative        
 ## Actual                   5.8e+05              1.2e+07           
-## Prediction (s.d.)        5.8e+05 (596)        1.2e+07 (12509)   
+## Prediction (s.d.)        5.8e+05 (596)        1.2e+07 (12506)   
 ## 95% CI                   [5.8e+05, 5.8e+05]   [1.2e+07, 1.2e+07]
 ##                                                                 
-## Absolute effect (s.d.)   486 (596)            10202 (12509)     
-## 95% CI                   [-683, 1641]         [-14338, 34466]   
+## Absolute effect (s.d.)   486 (596)            10202 (12506)     
+## 95% CI                   [-681, 1636]         [-14298, 34350]   
 ##                                                                 
 ## Relative effect (s.d.)   0.083% (0.1%)        0.083% (0.1%)     
 ## 95% CI                   [-0.12%, 0.28%]      [-0.12%, 0.28%]   
 ## 
-## Posterior tail-area probability p:   0.20813
+## Posterior tail-area probability p:   0.20628
 ## Posterior prob. of a causal effect:  79%
 ## 
 ## For more details, type: summary(impact, &quot;report&quot;)</code></pre>
