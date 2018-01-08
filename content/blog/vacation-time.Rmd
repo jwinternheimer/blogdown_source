@@ -1,25 +1,25 @@
 ---
-date: 2017-09-19T14:56:22-04:00
+date: 2018-01-05T14:56:22-04:00
 subtitle: ""
 type: "post"
 tags: []
 title: "How much vacation does Buffer take?"
 ---
 
-Buffer introduced a [minimum vacation policy](https://open.buffer.com/minimum-vacation/) a year ago, in which we encouraged Americans to take _at least_ 15 days of vacation (excluding holidays), Australians to take at least 17 days, Canadians at least 20 days, and Europeans at least 25 days. 
+Buffer introduced a [minimum vacation policy](https://open.buffer.com/minimum-vacation/) a year ago, in which we encouraged team members to take a certain number of vacation days, _at minimum_. If an individual was "falling behind", i.e. not taking as much vacation as he or she should, our team would kindly remind the individual that vacation is beneficial to the entire team's productivity and happiness. 
 
-In this analysis we'll try to measure the effect that it has had on the team over the past year. We use timetastic to schedule time off, and we're lucky enough to have a nice report that shows how much time each team member has taken off.
+In this analysis we'll try to measure the effect that this policy has had on the team in 2017. We use timetastic to schedule time off, and we're lucky enough to have a nice report that shows how much time each team member has taken off.
 
 ### Data collection
-We'll read the data in from a CSV that we exported from timetastic.
+We'll read the data in from a CSV that we exported from timetastic. I saved the data as an R data object -- let's read it into this R session.
 
-```{r include = FALSE}
+```{r include = FALSE, message = FALSE, warning = FALSE}
 library(dplyr); library(buffer); library(ggplot2)
 ```
 
 ```{r}
-# read CSV
-days <- read.csv('~/Downloads/vacation.csv', header = T)
+# load data
+days <- readRDS('vacation2017.rds')
 ```
 
 Now let's clean up the column names and set the dates as date types. 
@@ -37,14 +37,15 @@ set_date <- function(column) {
 days[c(3, 9:11)] <- lapply(days[c(3, 9:11)], set_date)
 ```
 
-Great! Now let's do a bit of tidying to make the analysis easier.
+Great! Now we need to do a bit of tidying to make the analysis easier.
 
 ### Data tidying
-We only want to look at time taken off in the past year, so let's filter out dates that don't apply. We also want to filter to only look at _vacation_ days taken off. We also want to exclude people that are no longer on the team.
+We only want to look at time taken off in 2017, so let's filter out dates that don't apply. We also want to filter to only look at _vacation_ days taken off. We also exclude people that are no longer on the team.
 
 ```{r include = FALSE}
 # people that left
-left <- c('Amy Heather', 'Niel de la Rouviere', 'Alex Ray' , 'Patrik Ward', 'Rodolphe Dutel')
+left <- c('Amy Heather', 'Niel de la Rouviere', 'Alex Ray' , 'Patrik Ward', 
+          'Rodolphe Dutel', 'Paul Thompson', 'Deborah Rippol', 'Ruth Ku')
 
 # filter out people who left
 days <- days %>%
@@ -55,7 +56,8 @@ days <- days %>%
 ```{r}
 # filter dates
 vacation <- days %>%
-  filter(start_time > (Sys.Date() - 365) & leave_type == "Vacation" & status == "Authorised")
+  filter(start_time >= '2017-01-01' & leave_type == "Vacation" & status == "Authorised") %>% 
+  mutate(end_time = ifelse(end_time > '2017-12-31', as.Date('2017-12-31'), end_time))
 ```
 
 Now let's group the data by team member, so that we can see the total number of days taken off by each.

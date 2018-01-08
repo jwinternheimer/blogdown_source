@@ -450,17 +450,63 @@ counts %>%
                        labels = c("1.5X", "1.25X", "Same", "1.25X", "1.5X"))
 ```
 
-### Measuring ROI
+### How do B2B and B2C companies measure ROI?
+Let's begin by making a side-by-side plot to show the absolute percentages. We need to do a small transformation first.
 
 ```{r}
+# create ROI dataframe
 roi <- responses %>% 
   select(q4, q74) %>% 
   rename(roi = q74) %>% 
-  filter((q4 == 'B2B' | q4 == 'B2C') & roi != '')
+  filter((q4 == 'B2B' | q4 == 'B2C') & roi != '') %>% 
+  mutate(roi = as.character(roi))
 
+# replace long engagement value with trucated one
 engagement_rows <- grep("Engagement", roi$roi)
 roi[engagement_rows, ]$roi <- "Engagement"
+```
 
+Now for the side by side plots.
+
+```{r}
+library(gridExtra)
+
+# b2c plot
+b2c <- roi %>% 
+  filter(roi != '' & q4 == 'B2C') %>% 
+  group_by(roi) %>% 
+  summarise(n = n()) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(roi = reorder(roi, n)) %>% 
+  ggplot(aes(x = roi, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "How Social Media ROI is Measured",
+       subtitle = "For B2C Companies")
+
+# b2b plot
+b2b <- roi %>% 
+  filter(roi != '' & q4 == 'B2B') %>% 
+  group_by(roi) %>% 
+  summarise(n = n()) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(roi = reorder(roi, n)) %>% 
+  ggplot(aes(x = roi, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "",
+       subtitle = "For B2B Companies")
+
+# plot two plots together
+grid.arrange(b2c, b2b, nrow = 1)
+```
+
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
 # calculate log ratios for the network counts
 counts <- roi %>%
   count(q4, roi) %>%
@@ -914,35 +960,35 @@ It looks like large businesses are slightly more likely to have a documented soc
 ### What factors are holding small businesses back from creating video content?
 We'll use the same approach as in the previous two questions. The question numbers are 32-38. This will take some data tidying first. We'll need to count the number of users that reqponded to each question and bind them into a single data frame.
 
-```{r}
+```{r warning = FALSE, message = FALSE}
 # get counts for each response
 dont_post <- responses %>% 
-  select(size, q32) %>% 
+  select(user_id, size, q32) %>% 
   rename(reason = q32) %>% 
   filter(reason == "We don't post video content")
 
 other <- responses %>% 
-  select(size, q33) %>% 
+  select(user_id, size, q33) %>% 
   rename(reason = q33) %>% 
   filter(reason == "Other")
 
 time <- responses %>% 
-  select(size, q34) %>% 
+  select(user_id, size, q34) %>% 
   rename(reason = q34) %>% 
   filter(reason == "Lack of time")
 
 budget <- responses %>% 
-  select(size, q35) %>% 
+  select(user_id, size, q35) %>% 
   rename(reason = q35) %>% 
   filter(reason == "No budget to produce video")
 
 film <- responses %>% 
-  select(size, q36) %>% 
+  select(user_id, size, q36) %>% 
   rename(reason = q36) %>% 
   filter(reason == 'Not sure how to film/edit')
 
 what <- responses %>% 
-  select(size, q37) %>% 
+  select(user_id, size, q37) %>% 
   rename(reason = q37) %>% 
   filter(reason == 'Not sure what video to create')
 
@@ -952,7 +998,46 @@ by_reason <- dont_post %>%
   bind_rows(budget) %>% 
   bind_rows(film) %>% 
   bind_rows(what)
+```
 
+Now let's create a side-by-side plot.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# small business plot
+small <- by_reason %>% 
+  filter(size == 'small') %>% 
+  group_by(reason) %>% 
+  summarise(n = n_distinct(user_id)) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(reason = reorder(reason, n)) %>% 
+  ggplot(aes(x = reason, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Why Video Content Isn't Created",
+       subtitle = "Small Businesses (1-50 employees)")
+
+# large business plot
+large <- by_reason %>% 
+  filter(reason != '' & size == 'large') %>% 
+  group_by(reason) %>% 
+  summarise(n = n_distinct(user_id)) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(reason = reorder(reason, n)) %>% 
+  ggplot(aes(x = reason, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "",
+       subtitle = "Large Businesses (50+ employees)")
+
+# plot two plots together
+grid.arrange(small, large, nrow = 1)
+```
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
 # calculate log ratios for the network counts
 counts <- by_reason %>%
   count(size, reason) %>%
@@ -1116,6 +1201,43 @@ all_networks <- fb %>%
 # determine if user has invested in ads
 responses <- responses %>% 
   mutate(has_run_ads = user_id %in% all_networks$user_id)
+```
+
+Let's make a side-by-side plot.
+
+```{r}
+# small business plot
+has_run_ads <- responses %>% 
+  filter(has_run_ads == TRUE & q76 != '') %>% 
+  group_by(q76) %>% 
+  summarise(n = n_distinct(user_id)) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(q76 = reorder(q76, n)) %>% 
+  ggplot(aes(x = q76, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "Efficacy of Social Media Marketing",
+       subtitle = "Companies that have run ads")
+
+# large business plot
+not_run_ads <- responses %>% 
+  filter(has_run_ads == FALSE & q76 != '') %>% 
+  group_by(q76) %>% 
+  summarise(n = n_distinct(user_id)) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  mutate(q76 = reorder(q76, n)) %>% 
+  ggplot(aes(x = q76, y = percent)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = "",
+       subtitle = "Companies that have not run ads")
+
+# plot two plots together
+grid.arrange(has_run_ads, not_run_ads, nrow = 1)
 ```
 
 Now let's see if these users responded any differently to the question about how effective social media marketing is.

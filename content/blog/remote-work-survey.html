@@ -113,46 +113,56 @@ colnames(responses) &lt;- column_names</code></pre>
 <p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
 <p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
 </div>
-<div id="measuring-roi" class="section level3">
-<h3>Measuring ROI</h3>
-<pre class="r"><code>roi &lt;- responses %&gt;% 
+<div id="how-do-b2b-and-b2c-companies-measure-roi" class="section level3">
+<h3>How do B2B and B2C companies measure ROI?</h3>
+<p>Let’s begin by making a side-by-side plot to show the absolute percentages. We need to do a small transformation first.</p>
+<pre class="r"><code># create ROI dataframe
+roi &lt;- responses %&gt;% 
   select(q4, q74) %&gt;% 
   rename(roi = q74) %&gt;% 
-  filter((q4 == &#39;B2B&#39; | q4 == &#39;B2C&#39;) &amp; roi != &#39;&#39;)
+  filter((q4 == &#39;B2B&#39; | q4 == &#39;B2C&#39;) &amp; roi != &#39;&#39;) %&gt;% 
+  mutate(roi = as.character(roi))
 
+# replace long engagement value with trucated one
 engagement_rows &lt;- grep(&quot;Engagement&quot;, roi$roi)
 roi[engagement_rows, ]$roi &lt;- &quot;Engagement&quot;</code></pre>
-<pre><code>## Warning in `[&lt;-.factor`(`*tmp*`, iseq, value = c(&quot;Engagement&quot;,
-## &quot;Engagement&quot;, : invalid factor level, NA generated</code></pre>
-<pre class="r"><code># calculate log ratios for the network counts
-counts &lt;- roi %&gt;%
-  count(q4, roi) %&gt;%
-  spread(q4, n, fill = 0) %&gt;%
-  mutate(total = B2B + B2C,
-         B2B = (B2B + 1) / sum(B2B + 1),
-         B2C = (B2C + 1) / sum(B2C + 1),
-         log_ratio = log2(B2C / B2B),
-         abs_ratio = abs(log_ratio)) %&gt;%
-  arrange(desc(log_ratio))
+<p>Now for the side by side plots.</p>
+<pre class="r"><code>library(gridExtra)
 
-counts %&gt;%
-    group_by(direction = ifelse(log_ratio &lt; 0, &#39;More &quot;B2B&quot;&#39;, &quot;More &#39;B2C&#39;&quot;)) %&gt;%
-    top_n(15, abs_ratio) %&gt;%
-    ungroup() %&gt;%
-    mutate(roi = reorder(roi, log_ratio)) %&gt;%
-    ggplot(aes(roi, log_ratio, color = direction)) +
-    geom_segment(aes(x = roi, xend = roi, y = 0, yend = log_ratio)) +
-    geom_point(size = 3.5) +
-    coord_flip() +
-    theme_ipsum() +
-    labs(x = NULL, 
-         y = NULL,
-         title = &quot;Relative likelihood of ROI measurement&quot;,
-         subtitle = &quot;For social media advertising&quot;) +
-    scale_color_discrete(name = &quot;&quot;, labels = c(&quot;More &#39;B2C&#39;&quot;, &quot;More &#39;B2B&#39;&quot;)) +
-    scale_y_continuous(breaks = seq(-3, 3),
-                       labels = c(&quot;8X&quot;, &quot;4X&quot;, &quot;2X&quot;, &quot;Same&quot;, &quot;2X&quot;, &quot;4X&quot;, &quot;8X&quot;))</code></pre>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+# b2c plot
+b2c &lt;- roi %&gt;% 
+  filter(roi != &#39;&#39; &amp; q4 == &#39;B2C&#39;) %&gt;% 
+  group_by(roi) %&gt;% 
+  summarise(n = n()) %&gt;% 
+  mutate(percent = n / sum(n)) %&gt;% 
+  mutate(roi = reorder(roi, n)) %&gt;% 
+  ggplot(aes(x = roi, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;How Social Media ROI is Measured&quot;,
+       subtitle = &quot;For B2C Companies&quot;)
+
+# b2b plot
+b2b &lt;- roi %&gt;% 
+  filter(roi != &#39;&#39; &amp; q4 == &#39;B2B&#39;) %&gt;% 
+  group_by(roi) %&gt;% 
+  summarise(n = n()) %&gt;% 
+  mutate(percent = n / sum(n)) %&gt;% 
+  mutate(roi = reorder(roi, n)) %&gt;% 
+  ggplot(aes(x = roi, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;&quot;,
+       subtitle = &quot;For B2B Companies&quot;)
+
+# plot two plots together
+grid.arrange(b2c, b2b, nrow = 1)</code></pre>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
 </div>
 <div id="company-size-and-most-important-networks" class="section level3">
 <h3>Company size and most important networks</h3>
@@ -170,9 +180,9 @@ table(responses$size)</code></pre>
 ## large small 
 ##   539  1236</code></pre>
 <p>Now let’s repeat what we’ve done above.</p>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-20-1.png" width="672" /></p>
 <p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-21-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-23-1.png" width="672" /></p>
 </div>
 <div id="do-large-businesses-publish-videos-more-frequently" class="section level3">
 <h3>Do large businesses publish videos more frequently?</h3>
@@ -224,9 +234,9 @@ large &lt;- responses %&gt;%
 
 # plot two plots together
 grid.arrange(small, large, nrow = 1)</code></pre>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-23-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-25-1.png" width="672" /></p>
 <p>Now we can calculate log ratios to determine if large businesses are more or less likely to publish videos at any frequency.</p>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-24-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-26-1.png" width="672" /></p>
 <p>So, it looks like “small” businesses that responded to our survey were more than twice as likely to never create video content than “large” businesses that responded.</p>
 </div>
 <div id="are-large-companies-more-likely-to-have-a-documented-social-media-strategy" class="section level3">
@@ -264,7 +274,7 @@ large &lt;- responses %&gt;%
 
 # plot two plots together
 grid.arrange(small, large, nrow = 1)</code></pre>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-25-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-27-1.png" width="672" /></p>
 <p>Now let’s plot the log ratios.</p>
 <pre class="r"><code># calculate log ratios for the network counts
 counts &lt;- responses %&gt;%
@@ -299,7 +309,7 @@ counts %&gt;%
     scale_y_continuous(breaks = seq(-3, 3),
                        labels = c(&quot;8X&quot;, &quot;4X&quot;, &quot;2X&quot;, 
                                   &quot;Same&quot;, &quot;2X&quot;, &quot;4X&quot;, &quot;8X&quot;))</code></pre>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-26-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-28-1.png" width="672" /></p>
 <p>It looks like large businesses are slightly more likely to have a documented social media strategy.</p>
 </div>
 <div id="what-factors-are-holding-small-businesses-back-from-creating-video-content" class="section level3">
@@ -307,32 +317,32 @@ counts %&gt;%
 <p>We’ll use the same approach as in the previous two questions. The question numbers are 32-38. This will take some data tidying first. We’ll need to count the number of users that reqponded to each question and bind them into a single data frame.</p>
 <pre class="r"><code># get counts for each response
 dont_post &lt;- responses %&gt;% 
-  select(size, q32) %&gt;% 
+  select(user_id, size, q32) %&gt;% 
   rename(reason = q32) %&gt;% 
   filter(reason == &quot;We don&#39;t post video content&quot;)
 
 other &lt;- responses %&gt;% 
-  select(size, q33) %&gt;% 
+  select(user_id, size, q33) %&gt;% 
   rename(reason = q33) %&gt;% 
   filter(reason == &quot;Other&quot;)
 
 time &lt;- responses %&gt;% 
-  select(size, q34) %&gt;% 
+  select(user_id, size, q34) %&gt;% 
   rename(reason = q34) %&gt;% 
   filter(reason == &quot;Lack of time&quot;)
 
 budget &lt;- responses %&gt;% 
-  select(size, q35) %&gt;% 
+  select(user_id, size, q35) %&gt;% 
   rename(reason = q35) %&gt;% 
   filter(reason == &quot;No budget to produce video&quot;)
 
 film &lt;- responses %&gt;% 
-  select(size, q36) %&gt;% 
+  select(user_id, size, q36) %&gt;% 
   rename(reason = q36) %&gt;% 
   filter(reason == &#39;Not sure how to film/edit&#39;)
 
 what &lt;- responses %&gt;% 
-  select(size, q37) %&gt;% 
+  select(user_id, size, q37) %&gt;% 
   rename(reason = q37) %&gt;% 
   filter(reason == &#39;Not sure what video to create&#39;)
 
@@ -342,58 +352,11 @@ by_reason &lt;- dont_post %&gt;%
   bind_rows(budget) %&gt;% 
   bind_rows(film) %&gt;% 
   bind_rows(what)</code></pre>
-<pre><code>## Warning in bind_rows_(x, .id): Unequal factor levels: coercing to character</code></pre>
-<pre><code>## Warning in bind_rows_(x, .id): binding character and factor vector,
-## coercing into character vector
-
-## Warning in bind_rows_(x, .id): binding character and factor vector,
-## coercing into character vector
-
-## Warning in bind_rows_(x, .id): binding character and factor vector,
-## coercing into character vector
-
-## Warning in bind_rows_(x, .id): binding character and factor vector,
-## coercing into character vector
-
-## Warning in bind_rows_(x, .id): binding character and factor vector,
-## coercing into character vector
-
-## Warning in bind_rows_(x, .id): binding character and factor vector,
-## coercing into character vector</code></pre>
-<pre class="r"><code># calculate log ratios for the network counts
-counts &lt;- by_reason %&gt;%
-  count(size, reason) %&gt;%
-  spread(size, n, fill = 0) %&gt;%
-  mutate(total = small + large,
-         small = (small) / sum(small + 1),
-         large = (large + 1) / sum(large + 1),
-         log_ratio = log2(small / large),
-         abs_ratio = abs(log_ratio)) %&gt;%
-  arrange(desc(log_ratio))
-
-# plot log ratios
-counts %&gt;%
-    group_by(direction = ifelse(log_ratio &lt; 0, &#39;More &quot;small&quot;&#39;, &quot;More &#39;large&#39;&quot;)) %&gt;%
-    top_n(15, abs_ratio) %&gt;%
-    ungroup() %&gt;%
-    mutate(reason = reorder(reason, log_ratio)) %&gt;%
-    ggplot(aes(reason, log_ratio, color = direction)) +
-    geom_segment(aes(x = reason, xend = reason,
-                     y = 0, yend = log_ratio), 
-                 size = 1.1, alpha = 0.6) +
-    geom_point(size = 3.5) +
-    coord_flip() +
-    theme_ipsum() +
-    labs(x = NULL, 
-         y = NULL,
-         title = &quot;Why Companies Don&#39;t Create More Video Content&quot;) +
-    scale_color_discrete(name = &quot;&quot;, labels = c(&quot;More &#39;small&#39;&quot;, &quot;More &#39;large&#39;&quot;)) +
-    scale_y_continuous(breaks = seq(-3, 3),
-                       labels = c(&quot;8X&quot;, &quot;4X&quot;, &quot;2X&quot;, 
-                                  &quot;Same&quot;, &quot;2X&quot;, &quot;4X&quot;, &quot;8X&quot;))</code></pre>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-27-1.png" width="672" /></p>
+<p>Now let’s create a side-by-side plot.</p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-30-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-31-1.png" width="672" /></p>
 </div>
-<div id="measuring-roi-1" class="section level3">
+<div id="measuring-roi" class="section level3">
 <h3>Measuring ROI</h3>
 <p>Let’s take the same approach to see if there is any difference in how small and large companies measure ROI.</p>
 <pre class="r"><code># small business plot
@@ -428,7 +391,7 @@ large &lt;- responses %&gt;%
 
 # plot two plots together
 grid.arrange(small, large, nrow = 1)</code></pre>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-28-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-32-1.png" width="672" /></p>
 <p>Now let’s plot the log ratios.</p>
 <pre class="r"><code>roi &lt;- responses %&gt;% 
   select(size, q74) %&gt;% 
@@ -471,7 +434,7 @@ counts %&gt;%
     scale_y_continuous(breaks = seq(-3, 3),
                        labels = c(&quot;8X&quot;, &quot;4X&quot;, &quot;2X&quot;, 
                                   &quot;Same&quot;, &quot;2X&quot;, &quot;4X&quot;, &quot;8X&quot;))</code></pre>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-29-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-33-1.png" width="672" /></p>
 </div>
 <div id="do-people-that-invest-in-social-media-ads-see-social-media-marketing-as-more-effective" class="section level3">
 <h3>Do people that invest in social media ads see social media marketing as more effective?</h3>
@@ -518,8 +481,42 @@ all_networks &lt;- fb %&gt;%
 # determine if user has invested in ads
 responses &lt;- responses %&gt;% 
   mutate(has_run_ads = user_id %in% all_networks$user_id)</code></pre>
+<p>Let’s make a side-by-side plot.</p>
+<pre class="r"><code># small business plot
+has_run_ads &lt;- responses %&gt;% 
+  filter(has_run_ads == TRUE &amp; q76 != &#39;&#39;) %&gt;% 
+  group_by(q76) %&gt;% 
+  summarise(n = n_distinct(user_id)) %&gt;% 
+  mutate(percent = n / sum(n)) %&gt;% 
+  mutate(q76 = reorder(q76, n)) %&gt;% 
+  ggplot(aes(x = q76, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;Efficacy of Social Media Marketing&quot;,
+       subtitle = &quot;Companies that have run ads&quot;)
+
+# large business plot
+not_run_ads &lt;- responses %&gt;% 
+  filter(has_run_ads == FALSE &amp; q76 != &#39;&#39;) %&gt;% 
+  group_by(q76) %&gt;% 
+  summarise(n = n_distinct(user_id)) %&gt;% 
+  mutate(percent = n / sum(n)) %&gt;% 
+  mutate(q76 = reorder(q76, n)) %&gt;% 
+  ggplot(aes(x = q76, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = NULL, y = NULL, title = &quot;&quot;,
+       subtitle = &quot;Companies that have not run ads&quot;)
+
+# plot two plots together
+grid.arrange(has_run_ads, not_run_ads, nrow = 1)</code></pre>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-35-1.png" width="672" /></p>
 <p>Now let’s see if these users responded any differently to the question about how effective social media marketing is.</p>
-<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-31-1.png" width="672" /></p>
+<p><img src="/blog/remote-work-survey_files/figure-html/unnamed-chunk-36-1.png" width="672" /></p>
 <p>Pretty cool!</p>
 <pre class="r"><code>responses %&gt;% 
   group_by(has_run_ads, q76) %&gt;% 
