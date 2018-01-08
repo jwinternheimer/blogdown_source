@@ -1,5 +1,5 @@
 ---
-date: 2017-09-19T14:56:22-04:00
+date: 2018-01-05T14:56:22-04:00
 subtitle: ""
 type: "post"
 tags: []
@@ -8,13 +8,13 @@ title: "How much vacation does Buffer take?"
 
 
 
-<p>Buffer introduced a <a href="https://open.buffer.com/minimum-vacation/">minimum vacation policy</a> a year ago, in which we encouraged Americans to take <em>at least</em> 15 days of vacation (excluding holidays), Australians to take at least 17 days, Canadians at least 20 days, and Europeans at least 25 days.</p>
-<p>In this analysis we’ll try to measure the effect that it has had on the team over the past year. We use timetastic to schedule time off, and we’re lucky enough to have a nice report that shows how much time each team member has taken off.</p>
+<p>Buffer introduced a <a href="https://open.buffer.com/minimum-vacation/">minimum vacation policy</a> a year ago, in which we encouraged team members to take a certain number of vacation days, <em>at minimum</em>. If an individual was “falling behind”, i.e. not taking as much vacation as he or she should, our team would kindly remind the individual that vacation is beneficial to the entire team’s productivity and happiness.</p>
+<p>In this analysis we’ll try to measure the effect that this policy has had on the team in 2017. We use timetastic to schedule time off, and we’re lucky enough to have a nice report that shows how much time each team member has taken off.</p>
 <div id="data-collection" class="section level3">
 <h3>Data collection</h3>
-<p>We’ll read the data in from a CSV that we exported from timetastic.</p>
-<pre class="r"><code># read CSV
-days &lt;- read.csv(&#39;~/Downloads/vacation.csv&#39;, header = T)</code></pre>
+<p>We’ll read the data in from a CSV that we exported from timetastic. I saved the data as an R data object – let’s read it into this R session.</p>
+<pre class="r"><code># load data
+days &lt;- readRDS(&#39;vacation2017.rds&#39;)</code></pre>
 <p>Now let’s clean up the column names and set the dates as date types.</p>
 <pre class="r"><code># change column names
 colnames(days) &lt;- safe_names(colnames(days))
@@ -26,14 +26,17 @@ set_date &lt;- function(column) {
 
 # apply function to date columns
 days[c(3, 9:11)] &lt;- lapply(days[c(3, 9:11)], set_date)</code></pre>
-<p>Great! Now let’s do a bit of tidying to make the analysis easier.</p>
+<pre><code>## Warning in strptime(x, format, tz = &quot;GMT&quot;): unknown timezone &#39;default/
+## America/New_York&#39;</code></pre>
+<p>Great! Now we need to do a bit of tidying to make the analysis easier.</p>
 </div>
 <div id="data-tidying" class="section level3">
 <h3>Data tidying</h3>
-<p>We only want to look at time taken off in the past year, so let’s filter out dates that don’t apply. We also want to filter to only look at <em>vacation</em> days taken off. We also want to exclude people that are no longer on the team.</p>
+<p>We only want to look at time taken off in 2017, so let’s filter out dates that don’t apply. We also want to filter to only look at <em>vacation</em> days taken off. We also exclude people that are no longer on the team.</p>
 <pre class="r"><code># filter dates
 vacation &lt;- days %&gt;%
-  filter(start_time &gt; (Sys.Date() - 365) &amp; leave_type == &quot;Vacation&quot; &amp; status == &quot;Authorised&quot;)</code></pre>
+  filter(start_time &gt;= &#39;2017-01-01&#39; &amp; leave_type == &quot;Vacation&quot; &amp; status == &quot;Authorised&quot;) %&gt;% 
+  mutate(end_time = ifelse(end_time &gt; &#39;2017-12-31&#39;, as.Date(&#39;2017-12-31&#39;), end_time))</code></pre>
 <p>Now let’s group the data by team member, so that we can see the total number of days taken off by each.</p>
 <pre class="r"><code># group by person
 by_user &lt;- vacation %&gt;%
@@ -62,11 +65,6 @@ by_user &lt;- by_user %&gt;%
 <p>The distribution is far wider for Europeans, which suggests that there are people that have taken very few days off (one person has only taken 2) and people that have taken many days off (one has taken 44.5).</p>
 <p>Canadians seem to know how to relax. Their distribution is more uniformly distributed and is closer to the 30-40 day range.</p>
 <p>Team members in Asia represent a smaller sample, but their distribution is centered around 11 days.</p>
-<p>How do the distributions look for people on different teams within Buffer?</p>
-<p><img src="/blog/vacation-time_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
-<p>This is pretty cool. The executive team is leading the way! In my opinion, this serves as a great example to us underlings to take time to rest and recharge. What do the distributions look like?</p>
-<p><img src="/blog/vacation-time_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
-<p>We can see that there is a lot of variance across and within teams. It’s really interesting to see the bimodal distributions for the Peopple team and the Execs. Some people within those teams seem to be more willing to take time off for vacation than others.</p>
 </div>
 <div id="thats-it-for-now" class="section level3">
 <h3>That’s it for now</h3>
