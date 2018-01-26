@@ -1,0 +1,114 @@
+---
+date: 2018-01-26T16:09:11-05:00
+subtitle: ""
+type: "post"
+tags: []
+title: "How does the 280 character limit affect tweet length?"
+---
+
+Twitter increased the character limit for most countries from 140 characters to 280 in 2017. Buffer quickly followed suit and enabled the functionality in our composer and browser etensions. Let's take a look at a sample of tweets scheduled with Buffer in the past couple of years to see if people have been taking advantage of the new character limit. :) 
+
+We'll gather the tweets from Buffer's `updates` table, but we could also use the handy `rtweet` package to gather the tweets. We'll gather a random sample of one million tweets sent in the past couple of years.
+
+```{r include = FALSE, message = FALSE, warning = FALSE}
+# load libraries
+library(buffer)
+library(dplyr)
+library(ggplot2)
+library(ggbeeswarm)
+library(hrbrthemes)
+library(lubridate)
+library(stringr)
+```
+
+```{r eval = FALSE, warning = FALSE, message = FALSE}
+# connect to redshift
+con <- redshift_connect()
+```
+
+```{sql eval = FALSE}
+select
+  id
+  , created_at
+  , sent_at
+  , date_trunc('month', sent_at) as sent_month
+  , was_sent_with_buffer
+  , text
+  , len(text) as length
+from dbt.updates
+where profile_service = 'twitter'
+and (not has_photo or has_photo is null)
+and (not has_multiple_photos or has_photo is null)
+and (not has_video or has_photo is null)
+and sent_at >= '2016-01-01'
+and sent_at < '2018-01-01'
+order by random()
+limit 1000000
+```
+
+Let's do a bit of tidying and look at what the dataset looks like. We want to determine if the tweet contains a link. If it does, we will remove it with the url and replace it with a shortened one that corresponds with the number of characters that Twitter's link shortener produces. We'll use the `stringr` package to extract the URL.
+
+According to [this article](https://follows.com/blog/2017/11/best-link-shortener-twitter), all links, regardless of their actual length, take up 23 characters in Twitter. That's a good enough approximation for us, so we'll replace all url's with a 23 character made up url. 
+
+```{r eval = FALSE}
+# define url regex pattern
+url_pattern <- "http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
+
+# extract url
+tweets$url <- str_extract(tweets$text, url_pattern)
+
+# get the year and replace urls
+tweets <- tweets %>% 
+  filter(was_sent_with_buffer) %>% 
+  mutate(year = as.factor(year(sent_at)),
+         sent_month = as.Date(sent_month, format = '%Y-%m-%d'),
+         text_updated = gsub(url_pattern, "https://t.co/x6yvMQC1vG", text)) %>% 
+  mutate(length = nchar(text_updated))
+```
+```{r include = FALSE}
+# save tweets
+# saveRDS(tweets, '280character_tweets.rds')
+
+# load data
+tweets <- readRDS('280character_tweets.rds')
+```
+
+```{r}
+# glimpse tweets
+glimpse(tweets)
+```
+
+Next let's explore our dataset and plot the number of tweets sent in each month.
+
+```{r echo = FALSE}
+count(tweets, sent_month) %>% 
+  ggplot(aes(x = sent_month, y = n)) +
+  geom_bar(stat = 'identity') +
+  scale_x_date(expand=c(0,0), 
+               date_breaks = "3 months", 
+               date_labels = "%b\n%Y") +
+  scale_y_comma(expand = c(0, 0), limits = c(0, NA)) +
+  labs(x=NULL, y="# Tweets", title="Tweets per Month") +
+  theme_ipsum()
+```
+
+Many of the tweets in our dataset were sent during the past six months. Now let's plot the distributions of tweet length over the course of the two years, and look at how the new character limit has affected it.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+ggplot(tweets, aes(x = sent_month, y = length)) +
+  geom_hline(yintercept = 140, linetype = "dotted", size = 0.25, color = "#2b2b2b") +
+  geom_quasirandom(aes(fill = year), size = 1, shape = 21, color = "white", stroke = 0.1) +
+  scale_x_date(expand = c(0, 0), date_breaks = "1 month", date_labels = "%b\n%Y") +
+  scale_y_comma(breaks=c(seq(0, 280, 70)), limits=c(0, 320)) +
+  labs(x = NULL, title = "Tweet Length Distribution (2 years)",
+       subtitle="NOTE: Length can go over max limit due to how Twitter's API includes URLs",
+       fill = NULL) +
+  theme_ipsum() +
+  guides(fill = FALSE)
+```
+
+We can see a growing trend of people becoming more comfortable with the new character limits, especially towards the end of 2017. That's it for now! 
+
+```{r include = FALSE}
+detach("package:lubridate", unload=TRUE)
+```

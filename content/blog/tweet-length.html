@@ -1,0 +1,67 @@
+---
+date: 2018-01-26T16:09:11-05:00
+subtitle: ""
+type: "post"
+tags: []
+title: "How does the 280 character limit affect tweet length?"
+---
+
+
+
+<p>Twitter increased the character limit for most countries from 140 characters to 280 in 2017. Buffer quickly followed suit and enabled the functionality in our composer and browser etensions. Let’s take a look at a sample of tweets scheduled with Buffer in the past couple of years to see if people have been taking advantage of the new character limit. :)</p>
+<p>We’ll gather the tweets from Buffer’s <code>updates</code> table, but we could also use the handy <code>rtweet</code> package to gather the tweets. We’ll gather a random sample of one million tweets sent in the past couple of years.</p>
+<pre class="r"><code># connect to redshift
+con &lt;- redshift_connect()</code></pre>
+<pre class="sql"><code>select
+  id
+  , created_at
+  , sent_at
+  , date_trunc(&#39;month&#39;, sent_at) as sent_month
+  , was_sent_with_buffer
+  , text
+  , len(text) as length
+from dbt.updates
+where profile_service = &#39;twitter&#39;
+and (not has_photo or has_photo is null)
+and (not has_multiple_photos or has_photo is null)
+and (not has_video or has_photo is null)
+and sent_at &gt;= &#39;2016-01-01&#39;
+and sent_at &lt; &#39;2018-01-01&#39;
+order by random()
+limit 1000000</code></pre>
+<p>Let’s do a bit of tidying and look at what the dataset looks like. We want to determine if the tweet contains a link. If it does, we will remove it with the url and replace it with a shortened one that corresponds with the number of characters that Twitter’s link shortener produces. We’ll use the <code>stringr</code> package to extract the URL.</p>
+<p>According to <a href="https://follows.com/blog/2017/11/best-link-shortener-twitter">this article</a>, all links, regardless of their actual length, take up 23 characters in Twitter. That’s a good enough approximation for us, so we’ll replace all url’s with a 23 character made up url.</p>
+<pre class="r"><code># define url regex pattern
+url_pattern &lt;- &quot;http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&amp;+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+&quot;
+
+# extract url
+tweets$url &lt;- str_extract(tweets$text, url_pattern)
+
+# get the year and replace urls
+tweets &lt;- tweets %&gt;% 
+  filter(was_sent_with_buffer) %&gt;% 
+  mutate(year = as.factor(year(sent_at)),
+         sent_month = as.Date(sent_month, format = &#39;%Y-%m-%d&#39;),
+         text_updated = gsub(url_pattern, &quot;https://t.co/x6yvMQC1vG&quot;, text)) %&gt;% 
+  mutate(length = nchar(text_updated))</code></pre>
+<pre class="r"><code># glimpse tweets
+glimpse(tweets)</code></pre>
+<pre><code>## Observations: 769,687
+## Variables: 10</code></pre>
+<pre><code>## Warning in as.POSIXlt.POSIXct(x, tz): unknown timezone &#39;default/America/
+## New_York&#39;</code></pre>
+<pre><code>## $ id                   &lt;chr&gt; &quot;585ff590ae69734266970527&quot;, &quot;595239dd2633...
+## $ created_at           &lt;dttm&gt; 2016-12-25 16:36:32, 2017-06-27 10:56:29...
+## $ sent_at              &lt;dttm&gt; 2016-12-25 16:36:45, 2017-06-27 10:56:35...
+## $ sent_month           &lt;date&gt; 2016-12-01, 2017-06-01, 2017-06-01, 2017...
+## $ was_sent_with_buffer &lt;lgl&gt; TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,...
+## $ text                 &lt;chr&gt; &quot;Jesus came to bring peace. He came to be...
+## $ length               &lt;int&gt; 94, 76, 23, 91, NA, 275, 140, 59, 90, 100...
+## $ url                  &lt;chr&gt; NA, NA, &quot;http://buff.ly/2sIFx9j&quot;, &quot;http:/...
+## $ year                 &lt;fctr&gt; 2016, 2017, 2017, 2017, 2017, 2017, 2017...
+## $ text_updated         &lt;chr&gt; &quot;Jesus came to bring peace. He came to be...</code></pre>
+<p>Next let’s explore our dataset and plot the number of tweets sent in each month.</p>
+<p><img src="/blog/tweet-length_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>Many of the tweets in our dataset were sent during the past six months. Now let’s plot the distributions of tweet length over the course of the two years, and look at how the new character limit has affected it.</p>
+<p><img src="/blog/tweet-length_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>We can see a growing trend of people becoming more comfortable with the new character limits, especially towards the end of 2017. That’s it for now!</p>
