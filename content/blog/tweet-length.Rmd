@@ -6,9 +6,9 @@ tags: []
 title: "How does the 280 character limit affect tweet length?"
 ---
 
-Twitter increased the character limit for most countries from 140 characters to 280 in 2017. Buffer quickly followed suit and enabled the functionality in our composer and browser etensions. Let's take a look at a sample of tweets scheduled with Buffer in the past couple of years to see if people have been taking advantage of the new character limit. :) 
+Twitter increased the character limit to 280 for most countries in November of 2017. We quickly followed suit and enabled the functionality in our composer and browser etensions. In this analysis we'll take a look at a random sample of tweets scheduled with Buffer in the past couple of years to see if people have been taking advantage of the increased character limit. 
 
-We'll gather the tweets from Buffer's `updates` table, but we could also use the handy `rtweet` package to gather the tweets. We'll gather a random sample of one million tweets sent in the past couple of years.
+We'll gather the tweets by querying Buffer's `updates` table, but we could also use the handy `rtweet` package to gather the tweets. We'll begin by gathering a random sample of one million tweets sent in 2016 and 2017.
 
 ```{r include = FALSE, message = FALSE, warning = FALSE}
 # load libraries
@@ -21,7 +21,7 @@ library(lubridate)
 library(stringr)
 ```
 
-```{r eval = FALSE, warning = FALSE, message = FALSE}
+```{r eval = FALSE, warning = FALSE, message = FALSE, include = FALSE}
 # connect to redshift
 con <- redshift_connect()
 ```
@@ -46,9 +46,9 @@ order by random()
 limit 1000000
 ```
 
-Let's do a bit of tidying and look at what the dataset looks like. We want to determine if the tweet contains a link. If it does, we will remove it with the url and replace it with a shortened one that corresponds with the number of characters that Twitter's link shortener produces. We'll use the `stringr` package to extract the URL.
+We need to do a bit of tidying before we draw any conclusions. We first want to determine if the tweet contains a link. If it does, we will remove the full-length url and replace it with a shortened one that contains the number of characters that Twitter's link shortener produces. We'll use the `stringr` package to extract the URL.
 
-According to [this article](https://follows.com/blog/2017/11/best-link-shortener-twitter), all links, regardless of their actual length, take up 23 characters in Twitter. That's a good enough approximation for us, so we'll replace all url's with a 23 character made up url. 
+According to [this article](https://follows.com/blog/2017/11/best-link-shortener-twitter), all links, regardless of their actual length, take up 23 characters in Twitter. That's a good enough approximation for us, so let's try to replace all url's with a 23 character made up url. 
 
 ```{r eval = FALSE}
 # define url regex pattern
@@ -57,7 +57,7 @@ url_pattern <- "http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-
 # extract url
 tweets$url <- str_extract(tweets$text, url_pattern)
 
-# get the year and replace urls
+# get the year, replace urls, and calculate length
 tweets <- tweets %>% 
   filter(was_sent_with_buffer) %>% 
   mutate(year = as.factor(year(sent_at)),
@@ -65,6 +65,7 @@ tweets <- tweets %>%
          text_updated = gsub(url_pattern, "https://t.co/x6yvMQC1vG", text)) %>% 
   mutate(length = nchar(text_updated))
 ```
+
 ```{r include = FALSE}
 # save tweets
 # saveRDS(tweets, '280character_tweets.rds')
@@ -73,12 +74,69 @@ tweets <- tweets %>%
 tweets <- readRDS('280character_tweets.rds')
 ```
 
+Let's glimpse the dataset that we have now. 
+
 ```{r}
 # glimpse tweets
 glimpse(tweets)
 ```
 
-Next let's explore our dataset and plot the number of tweets sent in each month.
+Looks good so far! 
+
+### Data cleaning 
+There are a few things we should check before making any inference. First let's check tweets that have null values in the `length` column.
+
+```{r}
+# view tweets with NA as length
+tweets %>% 
+  filter(is.na(length)) %>% 
+  head()
+```
+
+There are around 82 thousand of these tweets, and, to be honest, I don't know what they are. I think that we can go ahead and remove them from the dataset.
+
+```{r}
+# remove NAs
+tweets <- tweets %>% 
+  filter(!is.na(length))
+```
+
+Next let's look at tweets with over 140 characters that were sent before November 2017.
+
+```{r}
+# look at tweets with > 140 characters
+tweets %>% 
+  filter(year == '2016' & length > 140) %>% 
+  select(text_updated, length) %>% 
+  head()
+```
+
+We can see clearly here that we did not fully clean up the links in the tweets. We can also see that some tweets contain multiple links. Let's try another regex pattern to clean up the URLs.
+
+```{r}
+# replace string starting with "http" and followed by any number of non-space characters
+replace_url <- function(x) gsub("http[^[:space:]]*", "https://t.co/x6yvMQC1v2", x)
+
+# replace tweets in dataframe
+tweets <- tweets %>% 
+  mutate(text_updated = replace_url(text_updated)) %>% 
+  mutate(length = nchar(text_updated))
+```
+
+Now let's take another look at tweets with over 140 characters.
+
+```{r}
+# look at tweets with > 140 characters
+tweets %>% 
+  filter(year == '2016' & length > 140) %>% 
+  select(text_updated, length) %>% 
+  head()
+```
+
+Many of these are only a few characters above 140, so let's just leave it for now. :) 
+
+### Tweets per month
+Let's try to get a better understanding of the dataset. First, we'll plot the number of tweets sent in each month. We can see that many of the tweets in our dataset were sent during the past six months. Perhaps the sample of tweets we retreived were not randomly selected. We'll power through it for now. 
 
 ```{r echo = FALSE}
 count(tweets, sent_month) %>% 
@@ -92,13 +150,27 @@ count(tweets, sent_month) %>%
   theme_ipsum()
 ```
 
-Many of the tweets in our dataset were sent during the past six months. Now let's plot the distributions of tweet length over the course of the two years, and look at how the new character limit has affected it.
+### Distribution of tweet length 
+Let's plot the overall distribution of tweet length in our dataset. We can see a spike around 0 characters -- I'm imagining short emoji tweets. We also see a spike around 23 characters, which represents tweets that only contain links. For longer tweets, there is a local maximum around 88 characters, and a global maximum right under the 140 character limit. We can see a short, thin tail of tweets over 140 characters. 
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+ggplot(tweets, aes(x = length)) +
+  geom_density(fill = 'black', alpha = 0.3) +
+  geom_vline(xintercept = 140, linetype = 2, color = 'red') +
+  geom_vline(xintercept = 23, linetype = 2, color = 'red') +
+  scale_x_continuous(limits = c(0, 280), breaks = seq(0, 280, 20)) +
+  theme_ipsum() +
+  labs(x = "Tweet Length", y = "Density", title = "Distribution of Tweet Length",
+       subtitle = "Past two years")
+```
+
+Now let's plot the how the distribution of tweet length has changed over time. To do this, we'll create something called a [Beeswarm Plot](https://flowingdata.com/2016/09/08/beeswarm-plot-in-r-to-show-distributions/). Beeswarm plots are a way of plotting points that would ordinarily overlap so that they fall next to each other instead. In addition to reducing overplotting, it helps visualize the density of the data at each point, **while still showing each data point individually**.
 
 ```{r warning = FALSE, message = FALSE, echo = FALSE}
 ggplot(tweets, aes(x = sent_month, y = length)) +
   geom_hline(yintercept = 140, linetype = "dotted", size = 0.25, color = "#2b2b2b") +
   geom_quasirandom(aes(fill = year), size = 1, shape = 21, color = "white", stroke = 0.1) +
-  scale_x_date(expand = c(0, 0), date_breaks = "1 month", date_labels = "%b\n%Y") +
+  scale_x_date(expand = c(0, 0), date_breaks = "2 months", date_labels = "%b\n%Y") +
   scale_y_comma(breaks=c(seq(0, 280, 70)), limits=c(0, 320)) +
   labs(x = NULL, title = "Tweet Length Distribution (2 years)",
        subtitle="NOTE: Length can go over max limit due to how Twitter's API includes URLs",
@@ -107,7 +179,9 @@ ggplot(tweets, aes(x = sent_month, y = length)) +
   guides(fill = FALSE)
 ```
 
-We can see a growing trend of people becoming more comfortable with the new character limits, especially towards the end of 2017. That's it for now! 
+We can see that folks do seem to have been taking advantage of the new character limits in November and December. Interestingly, the proportion of tweets only containing links seems to have increased in early 2017, before decreasing towards the end of the year. I wonder why this might be. Do you think the trend of an increasing proporiton tweets over 140 characters will continue into 2018, or will people stay in their comfort zone of ~90 characters?
+
+I'd love to hear what you think! Thanks! :) 
 
 ```{r include = FALSE}
 detach("package:lubridate", unload=TRUE)

@@ -8,10 +8,8 @@ title: "How does the 280 character limit affect tweet length?"
 
 
 
-<p>Twitter increased the character limit for most countries from 140 characters to 280 in 2017. Buffer quickly followed suit and enabled the functionality in our composer and browser etensions. Let’s take a look at a sample of tweets scheduled with Buffer in the past couple of years to see if people have been taking advantage of the new character limit. :)</p>
-<p>We’ll gather the tweets from Buffer’s <code>updates</code> table, but we could also use the handy <code>rtweet</code> package to gather the tweets. We’ll gather a random sample of one million tweets sent in the past couple of years.</p>
-<pre class="r"><code># connect to redshift
-con &lt;- redshift_connect()</code></pre>
+<p>Twitter increased the character limit to 280 for most countries in November of 2017. We quickly followed suit and enabled the functionality in our composer and browser etensions. In this analysis we’ll take a look at a random sample of tweets scheduled with Buffer in the past couple of years to see if people have been taking advantage of the increased character limit.</p>
+<p>We’ll gather the tweets by querying Buffer’s <code>updates</code> table, but we could also use the handy <code>rtweet</code> package to gather the tweets. We’ll begin by gathering a random sample of one million tweets sent in 2016 and 2017.</p>
 <pre class="sql"><code>select
   id
   , created_at
@@ -29,21 +27,22 @@ and sent_at &gt;= &#39;2016-01-01&#39;
 and sent_at &lt; &#39;2018-01-01&#39;
 order by random()
 limit 1000000</code></pre>
-<p>Let’s do a bit of tidying and look at what the dataset looks like. We want to determine if the tweet contains a link. If it does, we will remove it with the url and replace it with a shortened one that corresponds with the number of characters that Twitter’s link shortener produces. We’ll use the <code>stringr</code> package to extract the URL.</p>
-<p>According to <a href="https://follows.com/blog/2017/11/best-link-shortener-twitter">this article</a>, all links, regardless of their actual length, take up 23 characters in Twitter. That’s a good enough approximation for us, so we’ll replace all url’s with a 23 character made up url.</p>
+<p>We need to do a bit of tidying before we draw any conclusions. We first want to determine if the tweet contains a link. If it does, we will remove the full-length url and replace it with a shortened one that contains the number of characters that Twitter’s link shortener produces. We’ll use the <code>stringr</code> package to extract the URL.</p>
+<p>According to <a href="https://follows.com/blog/2017/11/best-link-shortener-twitter">this article</a>, all links, regardless of their actual length, take up 23 characters in Twitter. That’s a good enough approximation for us, so let’s try to replace all url’s with a 23 character made up url.</p>
 <pre class="r"><code># define url regex pattern
 url_pattern &lt;- &quot;http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&amp;+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+&quot;
 
 # extract url
 tweets$url &lt;- str_extract(tweets$text, url_pattern)
 
-# get the year and replace urls
+# get the year, replace urls, and calculate length
 tweets &lt;- tweets %&gt;% 
   filter(was_sent_with_buffer) %&gt;% 
   mutate(year = as.factor(year(sent_at)),
          sent_month = as.Date(sent_month, format = &#39;%Y-%m-%d&#39;),
          text_updated = gsub(url_pattern, &quot;https://t.co/x6yvMQC1vG&quot;, text)) %&gt;% 
   mutate(length = nchar(text_updated))</code></pre>
+<p>Let’s glimpse the dataset that we have now.</p>
 <pre class="r"><code># glimpse tweets
 glimpse(tweets)</code></pre>
 <pre><code>## Observations: 769,687
@@ -60,8 +59,93 @@ glimpse(tweets)</code></pre>
 ## $ url                  &lt;chr&gt; NA, NA, &quot;http://buff.ly/2sIFx9j&quot;, &quot;http:/...
 ## $ year                 &lt;fctr&gt; 2016, 2017, 2017, 2017, 2017, 2017, 2017...
 ## $ text_updated         &lt;chr&gt; &quot;Jesus came to bring peace. He came to be...</code></pre>
-<p>Next let’s explore our dataset and plot the number of tweets sent in each month.</p>
-<p><img src="/blog/tweet-length_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
-<p>Many of the tweets in our dataset were sent during the past six months. Now let’s plot the distributions of tweet length over the course of the two years, and look at how the new character limit has affected it.</p>
-<p><img src="/blog/tweet-length_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
-<p>We can see a growing trend of people becoming more comfortable with the new character limits, especially towards the end of 2017. That’s it for now!</p>
+<p>Looks good so far!</p>
+<div id="data-cleaning" class="section level3">
+<h3>Data cleaning</h3>
+<p>There are a few things we should check before making any inference. First let’s check tweets that have null values in the <code>length</code> column.</p>
+<pre class="r"><code># view tweets with NA as length
+tweets %&gt;% 
+  filter(is.na(length)) %&gt;% 
+  head()</code></pre>
+<pre><code>##                         id          created_at             sent_at
+## 1 5a20aee2e47d2b3073c80136 2017-12-01 01:22:42 2017-12-01 03:22:00
+## 2 5a08a327f8594ccb736f1074 2017-11-12 19:38:15 2017-11-13 06:15:05
+## 3 5a355082fc7ffc022a2a2395 2017-12-16 16:57:38 2017-12-17 07:14:00
+## 4 596da62014bfa12032e4a153 2017-07-18 06:09:36 2017-07-19 06:07:06
+## 5 5a35efd99363921642c823fa 2017-12-17 04:17:29 2017-12-20 01:40:09
+## 6 59d75e5634e95d440812a4cc 2017-10-06 10:43:34 2017-10-06 15:36:04
+##   sent_month was_sent_with_buffer text length  url year text_updated
+## 1 2017-12-01                 TRUE &lt;NA&gt;     NA &lt;NA&gt; 2017         &lt;NA&gt;
+## 2 2017-11-01                 TRUE &lt;NA&gt;     NA &lt;NA&gt; 2017         &lt;NA&gt;
+## 3 2017-12-01                 TRUE &lt;NA&gt;     NA &lt;NA&gt; 2017         &lt;NA&gt;
+## 4 2017-07-01                 TRUE &lt;NA&gt;     NA &lt;NA&gt; 2017         &lt;NA&gt;
+## 5 2017-12-01                 TRUE &lt;NA&gt;     NA &lt;NA&gt; 2017         &lt;NA&gt;
+## 6 2017-10-01                 TRUE &lt;NA&gt;     NA &lt;NA&gt; 2017         &lt;NA&gt;</code></pre>
+<p>There are around 82 thousand of these tweets, and, to be honest, I don’t know what they are. I think that we can go ahead and remove them from the dataset.</p>
+<pre class="r"><code># remove NAs
+tweets &lt;- tweets %&gt;% 
+  filter(!is.na(length))</code></pre>
+<p>Next let’s look at tweets with over 140 characters that were sent before November 2017.</p>
+<pre class="r"><code># look at tweets with &gt; 140 characters
+tweets %&gt;% 
+  filter(year == &#39;2016&#39; &amp; length &gt; 140) %&gt;% 
+  select(text_updated, length) %&gt;% 
+  head()</code></pre>
+<pre><code>##                                                                                                                                                                                                                                                text_updated
+## 1                                                                                                          https://t.co/x6yvMQC1vG~r/TheGlobalMuslimBrotherhoodDailyWatch/~3/u08D2Wtnbb0/ RECOMMENDED READING: “Double Games Of The #UK #MuslimBrotherhood”
+## 2                                                       https://t.co/x6yvMQC1vG~r/TheGlobalMuslimBrotherhoodDailyWatch/~3/dEeOSbPSzdc/ FEATURED: US #MuslimBrotherhood Coalition Announces Formation Of New Global Body; #UK #MuslimBrotherhood Leaders in…
+## 3                                       .@rdesai7: My Happy #AlohaFriday song pick is (once again) Jack Johnson/Hawaiian Slack Key Kings &quot;Better Together&quot; \U0001f33a\U0001f334\U0001f3c4\U0001f3fe‍♀️\U0001f44f\U0001f3fd\U0001f3b6❤️️https://t.co/x6yvMQC1vG…
+## 4 RankBrain Judgment Day: four SEO tactics you’ll need to survive | Search Engine Watch https://t.co/x6yvMQC1vG|EMAIL_B64|*&amp;utm_source=Search+Engine+Watch&amp;utm_campaign=9630ee1ecb-23_03_2016_NL&amp;utm_medium=email&amp;utm_term=0_e118661359-9630ee1ecb-17050349
+## 5                                                                                                  RT @BBCNews: Boris Johnson says &quot;fat cats&quot; who back Remain know nothing of hospital waiting listshttps://t.co/x6yvMQC1vG #EUref https://t.co/x6yvMQC1vG…
+## 6                                                                                                   RT @GreysABC Chandra Wilson knows what she&#39;s talking about #GreysAnatomy https://t.co/x6yvMQC1vG#.umvh1z9l7 #SocialMediaMarketing #SocialMediaPromotion
+##   length
+## 1    144
+## 2    195
+## 3    152
+## 4    249
+## 5    152
+## 6    151</code></pre>
+<p>We can see clearly here that we did not fully clean up the links in the tweets. We can also see that some tweets contain multiple links. Let’s try another regex pattern to clean up the URLs.</p>
+<pre class="r"><code># replace string starting with &quot;http&quot; and followed by any number of non-space characters
+replace_url &lt;- function(x) gsub(&quot;http[^[:space:]]*&quot;, &quot;https://t.co/x6yvMQC1v2&quot;, x)
+
+# replace tweets in dataframe
+tweets &lt;- tweets %&gt;% 
+  mutate(text_updated = replace_url(text_updated)) %&gt;% 
+  mutate(length = nchar(text_updated))</code></pre>
+<p>Now let’s take another look at tweets with over 140 characters.</p>
+<pre class="r"><code># look at tweets with &gt; 140 characters
+tweets %&gt;% 
+  filter(year == &#39;2016&#39; &amp; length &gt; 140) %&gt;% 
+  select(text_updated, length) %&gt;% 
+  head()</code></pre>
+<pre><code>##                                                                                                                                                                                                         text_updated
+## 1                                                       RT @worldofabe: Need talent? Come see me about the Free Agent pilot at the #GC2020 Innovation Fair tomorrow! https://t.co/x6yvMQC1v2 https://t.co/x6yvMQC1v2
+## 2                                                          RT @ConWayFor: From @cllrjoeporter: Let’s all now embrace Brexit and become an even greater global leader https://t.co/x6yvMQC1v2 https://t.co/x6yvMQC1v2
+## 3 .@rdesai7: My Happy #AlohaFriday song pick is (once again) Jack Johnson/Hawaiian Slack Key Kings &quot;Better Together&quot; \U0001f33a\U0001f334\U0001f3c4\U0001f3fe‍♀️\U0001f44f\U0001f3fd\U0001f3b6❤️️https://t.co/x6yvMQC1v2
+## 4                                                            RT @BBCNews: Boris Johnson says &quot;fat cats&quot; who back Remain know nothing of hospital waiting listshttps://t.co/x6yvMQC1v2 #EUref https://t.co/x6yvMQC1v2
+## 5                                                                 RT @OficialCentro #Boletín244 Bachea Concejo Municipal 31 calles de 19 localidades de Centro. Ver  https://t.co/x6yvMQC1v2 https://t.co/x6yvMQC1v2
+## 6                                                           #GreenImperialism https://t.co/x6yvMQC1v2 The Challenge: https://t.co/x6yvMQC1v2 https://t.co/x6yvMQC1v2 https://t.co/x6yvMQC1v2 https://t.co/x6yvMQC1v2
+##   length
+## 1    156
+## 2    153
+## 3    151
+## 4    151
+## 5    146
+## 6    152</code></pre>
+<p>Many of these are only a few characters above 140, so let’s just leave it for now. :)</p>
+</div>
+<div id="tweets-per-month" class="section level3">
+<h3>Tweets per month</h3>
+<p>Let’s try to get a better understanding of the dataset. First, we’ll plot the number of tweets sent in each month. We can see that many of the tweets in our dataset were sent during the past six months. Perhaps the sample of tweets we retreived were not randomly selected. We’ll power through it for now.</p>
+<p><img src="/blog/tweet-length_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+</div>
+<div id="distribution-of-tweet-length" class="section level3">
+<h3>Distribution of tweet length</h3>
+<p>Let’s plot the overall distribution of tweet length in our dataset. We can see a spike around 0 characters – I’m imagining short emoji tweets. We also see a spike around 23 characters, which represents tweets that only contain links. For longer tweets, there is a local maximum around 88 characters, and a global maximum right under the 140 character limit. We can see a short, thin tail of tweets over 140 characters.</p>
+<p><img src="/blog/tweet-length_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>Now let’s plot the how the distribution of tweet length has changed over time. To do this, we’ll create something called a <a href="https://flowingdata.com/2016/09/08/beeswarm-plot-in-r-to-show-distributions/">Beeswarm Plot</a>. Beeswarm plots are a way of plotting points that would ordinarily overlap so that they fall next to each other instead. In addition to reducing overplotting, it helps visualize the density of the data at each point, <strong>while still showing each data point individually</strong>.</p>
+<p><img src="/blog/tweet-length_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
+<p>We can see that folks do seem to have been taking advantage of the new character limits in November and December. Interestingly, the proportion of tweets only containing links seems to have increased in early 2017, before decreasing towards the end of the year. I wonder why this might be. Do you think the trend of an increasing proporiton tweets over 140 characters will continue into 2018, or will people stay in their comfort zone of ~90 characters?</p>
+<p>I’d love to hear what you think! Thanks! :)</p>
+</div>
