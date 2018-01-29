@@ -1,0 +1,317 @@
+---
+date: 2018-01-29T11:29:16-05:00
+type: "post"
+tags: []
+title: "Revisiting Churn Surveys"
+subtitle: "A Tidy Text Analysis"
+---
+
+
+
+<p>Back in July, I <a href="https://jwinternheimer.github.io/blog/churn-survey-text-analysis/">analyzed responses</a> from Buffer’s churn surveys. In this post we’ll recreate that analysis with more recent data. The goal is to see if general themes and trends have changed over time. It will also help remind us of the reasons why people choose to leave Buffer.</p>
+<p>We’ll use data collected from four separate surveys that represents different types of churn:</p>
+<ul>
+<li>The <em>exit survey</em> prompts users to explain why they are abandoning the Buffer product completely.</li>
+<li>The <em>business churn survey</em> prompts users to explain why they are canceling their business subscriptions.</li>
+<li>The <em>awesome downgrade survey</em> prompts users to explain why they are canceling their awesome subscriptions.</li>
+<li>The <em>business downgrade awesome survey</em> asks why users downgrade from a Business to an Awesome subscription.</li>
+</ul>
+<p>We’ve gathered the data in <a href="https://looker.buffer.com/looks/3949">this look</a>. We can use the <code>get_look()</code> function from the <code>buffer</code> package to import all of the survey responses into a ataframe.</p>
+<pre class="r"><code># get data from looker
+responses &lt;- get_look(3949)</code></pre>
+<p>Now we just need to clean the data a bit.</p>
+<pre class="r"><code># rename columns
+colnames(responses) &lt;- c(&#39;created_at&#39;, &#39;user_id&#39;, &#39;type&#39;, &#39;reason&#39;, &#39;specifics&#39;, &#39;details&#39;)
+
+# set reasons as character vectors
+responses$specifics &lt;- as.character(responses$specifics)
+responses$details &lt;- as.character(responses$details)</code></pre>
+<p>Now we’ll set the dates and remove null values.</p>
+<pre class="r"><code># set date as a date object
+responses$created_at &lt;- as.Date(responses$created_at, format = &#39;%Y-%m-%d&#39;)
+
+# get the month
+responses &lt;- responses %&gt;%
+  mutate(month = floor_date(created_at, unit = &#39;months&#39;))
+
+# remove the reason and specifics columns
+responses$reason &lt;- NULL
+responses$specifics &lt;- NULL
+
+# remove NA values
+responses &lt;- responses %&gt;%
+  filter(details != &quot;&quot; &amp; details != &#39;[No reason supplied]&#39; &amp; details != &#39;false&#39;)</code></pre>
+<p>We’re down to around 18 thousand responses from November 2015 until January 2018! We’re now ready to do some exploratory analysis on the responses.</p>
+<div id="tidy-text" class="section level3">
+<h3>Tidy Text</h3>
+<p>We define the tidy text format as being a table with one-token-per-row. A token can be a word or an n-gram. Within our tidy text framework, we need to both break the comments into individual tokens and transform it to a tidy data structure.</p>
+<p>To do this, we use tidytext’s <code>unnest_tokens()</code> function from the <code>tidytext</code> package. This breaks the churn survey responses into individual words and includes one word per row while retaining the attributes (survey type, user_id, etc) of that word.</p>
+<pre class="r"><code># unnest the tokens
+text_df &lt;- responses %&gt;%
+  unnest_tokens(word, details)</code></pre>
+<p>Now that the data is in one-word-per-row format, we can manipulate it with tidy tools like <code>dplyr</code>. Often in text analysis, we will want to remove stop words; stop words are words that are not useful for an analysis, typically extremely common words such as “the”, “of”, “to”, and so forth in English. We can remove stop words (kept in the tidytext dataset <code>stop_words</code>) with an <code>anti_join()</code>.</p>
+<p>First, let’s remove a couple useful words from the <code>stop_words</code> dataset. We want to keep “not”, “no”, “too”, “does”, and “doesn’t”, “can” and “can’t”.</p>
+<pre class="r"><code># collect stop words
+data(stop_words)
+
+# words to keep
+keep_words &lt;- c(&quot;not&quot;, &quot;no&quot;, &quot;too&quot;, &quot;does&quot;, &quot;doesn&#39;t&quot;, &quot;can&quot;, &quot;can&#39;t&quot;)
+
+# limit stop words
+stop_words &lt;- stop_words %&gt;% 
+  filter(!(word %in% keep_words))
+
+# remove stop words from our dataset
+text_df &lt;- text_df %&gt;%
+  anti_join(stop_words, by = &quot;word&quot;)</code></pre>
+<p>We now have a tidy dataframe. :)</p>
+</div>
+<div id="exploratory-analysis" class="section level3">
+<h3>Exploratory analysis</h3>
+<p>Let’s begin by plotting the most commonly occurring words in all of the churn surveys.</p>
+<p><img src="/blog/revisiting-churn-surveys_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>Certainly interesting, but not very useful. It would help to gather some context about each word.</p>
+</div>
+<div id="diving-deeper-into-word-frequency" class="section level3">
+<h3>Diving deeper into word frequency</h3>
+<p>Another way to analyze a term’s frequency is to calculate the <em>inverse document frequency (tdf)</em>, which is defined as:</p>
+<p><code>idf(term) = ln(collection / collections containing term)</code></p>
+<p>A term’s inverse document frequency (idf) decreases the weight for commonly used words and increases the weight for words that are used more sparsely. This can be combined with the overall term frequency to calculate a term’s <code>tf-idf</code> (the two quantities multiplied together), the frequency of a term adjusted for how rarely it is used.</p>
+<p>The idea of tf-idf is to find the important words for the content of each collection of words (the different surveys being the collections of words) by decreasing the weight for commonly used words and increasing the weight for words that are not used very much in an entire collection of documents, in this case the text of all of the surveys combined. We want to find words that are most unique to each type of churn survey.</p>
+<p>The <code>bind_tf_idf</code> function takes a tidy text dataset as input with one row per word, per document. One column (<code>word</code>) contains the terms, one column contains the documents (<code>type</code>), and the last necessary column contains the counts, how many times each document contains each term (<code>n</code>).</p>
+<pre class="r"><code># calculate the frequency of words for each survey
+survey_words &lt;- text_df %&gt;%
+  count(type, word, sort = TRUE) %&gt;%
+  ungroup()
+
+# calculate the total number of words for each survey
+total_words &lt;- survey_words %&gt;% 
+  group_by(type) %&gt;% 
+  summarize(total = sum(n))
+
+# join the total words back into the survey_words data frame
+survey_words &lt;- left_join(survey_words, total_words, by = &quot;type&quot;) %&gt;%
+  filter(type != &quot;&quot;)
+
+# view data 
+head(survey_words)</code></pre>
+<pre><code>## # A tibble: 6 x 4
+##                       type    word     n total
+##                     &lt;fctr&gt;   &lt;chr&gt; &lt;int&gt; &lt;int&gt;
+## 1 awesome_downgrade_survey     not  2701 56249
+## 2 awesome_downgrade_survey  buffer  1960 56249
+## 3              exit_survey account  1846 34951
+## 4              exit_survey     not  1479 34951
+## 5 awesome_downgrade_survey  social  1085 56249
+## 6 awesome_downgrade_survey    plan  1053 56249</code></pre>
+<p>There is one row in this data frame for each word-survey combination. <code>n</code> is the number of times that word is used in that survey and total is the total number of words in that survey’s responses.</p>
+</div>
+<div id="the-bind_tf_idf-function" class="section level3">
+<h3>The <code>bind_tf_idf</code> function</h3>
+<p>The idea of tf-idf is to find the important words for the content of each collection of comments by decreasing the weight for commonly used words and increasing the weight for words that are not used very much in an entire collection of documents, in this case all survey responses. We calculate <code>tf-idf</code> below.</p>
+<pre class="r"><code># calculate tf_idf
+survey_words &lt;- survey_words %&gt;%
+  bind_tf_idf(word, type, n)
+
+# view sample
+head(survey_words)</code></pre>
+<pre><code>## # A tibble: 6 x 7
+##                       type    word     n total         tf   idf tf_idf
+##                     &lt;fctr&gt;   &lt;chr&gt; &lt;int&gt; &lt;int&gt;      &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;
+## 1 awesome_downgrade_survey     not  2701 56249 0.04801863     0      0
+## 2 awesome_downgrade_survey  buffer  1960 56249 0.03484506     0      0
+## 3              exit_survey account  1846 34951 0.05281680     0      0
+## 4              exit_survey     not  1479 34951 0.04231639     0      0
+## 5 awesome_downgrade_survey  social  1085 56249 0.01928923     0      0
+## 6 awesome_downgrade_survey    plan  1053 56249 0.01872033     0      0</code></pre>
+<p>The <code>idf</code> and <code>tf_idf</code> will be 0 for common words like “the” and “a”. Let’s visualize high <code>tf_idf</code> words for each type of churn survey.</p>
+<p><img src="/blog/revisiting-churn-surveys_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+<p>The words that appear in these graphs appear more frequently in the specific survey type than they do in the other surveys. It’s interesting to see “finances” appear more commonly in the Awesome downgrade survey than the other surveys. The results under <code>business_churn_survey</code> do not appear to be very helpful, but prices (and price differences) are the top two terms listed in the business downgrade survey. The terms “duplicate”, “address”, and “created” indicate that account creation issues are a common reason for deleting Buffer accounts. Makes sense.</p>
+<p>We don’t have much context and are required to speculate on what the meaning and emotion behind the words might be. It may be beneficial to look at groups of words to help us gather more information. We’ll explore this by looking at n-grams later in the analysis.</p>
+<p>For now, let’s explore how different topics have changed over time.</p>
+</div>
+<div id="change-over-time" class="section level2">
+<h2>Change over time</h2>
+<p>What words and topics have become more frequent, or less frequent, over time? These could give us a sense of what has become more and less important in our customers’ eyes.</p>
+<p>We can first count the number of times each word is used each month, and then use the <code>broom</code> package to fit a logistic regression model to examine whether the frequency of each word increases or decreases over time. Every term will then have a growth rate (as an exponential term) associated with it.</p>
+<p>Let’s start by defining a function that will plot the 12 terms with the highest coefficients of change for any particular survey type.</p>
+<p>Now let’s plot the terms with the highest slopes in the Business churn survey.</p>
+<pre class="r"><code># plot change words for business survey
+plot_change(&quot;business_churn_survey&quot;) + labs(subtitle = &quot;Business Churn Survey&quot;)</code></pre>
+<p><img src="/blog/revisiting-churn-surveys_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>It’s interesting to see “client” and “clients” mentioned so frequently in the Business churn survey responses. I wonder what context they were used in? The term “instagram” seems to be coming up with increased frequency. I wonder if there are some improvements we can make to the Instagram Reminders process. The “afford” and “cost” terms indicate that price is still a factor for some folks. It’s also quite interesting to see “scheduling” appear more frequently – this makes sense, given that we’ve redesigned the posting schedule, but it is useful to know that it is causing people to churn.</p>
+<p>Let’s look at a few of the business churn survey responses that include “client”.</p>
+<pre class="r"><code># get responses with &#39;client&#39;
+responses %&gt;% 
+  filter(type == &#39;business_churn_survey&#39; &amp; tolower(details) %like% &#39;client&#39;) %&gt;% 
+  select(details) %&gt;% 
+  head(10)</code></pre>
+<pre><code>##                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    details
+## 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               The calendar functionality just isn&#39;t strong enough for what we need - there has been a lot of issues too with profiles disconnected without us being informed.\\n\\nTHe price point sits too high for what is being offered here and that is hwy we have decided to move to another platform that has better functions, bulk upload and actual reports that show data in a way a client would understand.\\n\\nThanks,\\n
+## 2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          Weve had an issue several times now where a post for one Profile got postet on all linked profiles. since were taking care of our Clients social media profiles this is a nogo. None of them wants to find someone elses Posts on their profiles. thats why we want to cancel our businessplan.
+## 3  So expensive and all about managing multiple networks from one place, then one can&#39;t even make proper posting groups that work, when I want to rebuffer a post I can&#39;t rebuffer it to groups but just to the very same one network I am rebuffering from.\\n\\nInstagram reminders are a joke.\\n\\nAnalytics are a joke\\n\\nand the biggest joke of them all, with this pricing that you have your stupid Reply and your even more cheekier strategy of pre announcing analytics as something WOOOW in 2018 and then also probably charge it extra.\\n\\nSorry but for such a big product like buffer with such a budget and so many clients it is really sad to see how this product has no edge at all and all innovation and talent has been probably wasted due to corporate greed.\\n\\nDefinitely  never coming back, probably one of the worst Value for Money tools I have come across so far.\\n\\nThe only thing, the interface looks nice but also only at first glance, then it has also major flaws, which really shouldn&#39;t be in a product that has been for so long on the market, but I guess that is what happens when all money goes into sponsored blog posts and those shitty things rather than into development and innovation.
+## 4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          We lost a couple of clients.....we will be back
+## 5                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Not quite what we were after. Social listening is important to us, no IG scheduling available either. Too much for something we could do natively while we have a small number of social clients.
+## 6                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 I no longer need to use a scheduling program for my biggest client, who lost their sponsorship and has to downsize their marketing.  I really liked the plan, just a shift in my and my client&#39;s needs. 
+## 7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               We have less clients so we were able to combine all clients to one account
+## 8                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            Change in client arrangement.\\nLack of Instagram integration
+## 9                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                We&#39;re dropping our client
+## 10                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           lost client, can&#39;t afford it just for myself.</code></pre>
+<p>Interestingly, it seems like there are a couple themes: users explaining problems with Buffer in the context of what their clients need, and people who lost clients no longer needing or affording Buffer. Makes sense. Let’s try to get a feel for why people include “post” in their responses.</p>
+<pre class="r"><code># get responses with &#39;post&#39;
+responses %&gt;% 
+  filter(type == &#39;business_churn_survey&#39; &amp; tolower(details) %like% &#39;post&#39;) %&gt;% 
+  select(details) %&gt;% 
+  head(10)</code></pre>
+<pre><code>##                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    details
+## 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         Hi there,\\n\\nWe were very happy with the support and the program. However we have decided to use one system to schedule all our posts, manage our community and have insights in the stats of all platforms, so we don&#39;t need Buffer at the moment. Thank you for the great support!\\n\\nBest wishes, Nicolet
+## 2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          Weve had an issue several times now where a post for one Profile got postet on all linked profiles. since were taking care of our Clients social media profiles this is a nogo. None of them wants to find someone elses Posts on their profiles. thats why we want to cancel our businessplan.
+## 3  So expensive and all about managing multiple networks from one place, then one can&#39;t even make proper posting groups that work, when I want to rebuffer a post I can&#39;t rebuffer it to groups but just to the very same one network I am rebuffering from.\\n\\nInstagram reminders are a joke.\\n\\nAnalytics are a joke\\n\\nand the biggest joke of them all, with this pricing that you have your stupid Reply and your even more cheekier strategy of pre announcing analytics as something WOOOW in 2018 and then also probably charge it extra.\\n\\nSorry but for such a big product like buffer with such a budget and so many clients it is really sad to see how this product has no edge at all and all innovation and talent has been probably wasted due to corporate greed.\\n\\nDefinitely  never coming back, probably one of the worst Value for Money tools I have come across so far.\\n\\nThe only thing, the interface looks nice but also only at first glance, then it has also major flaws, which really shouldn&#39;t be in a product that has been for so long on the market, but I guess that is what happens when all money goes into sponsored blog posts and those shitty things rather than into development and innovation.
+## 4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 currently we need the auto post feature, not the scheduled post. thanks.
+## 5                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           I am switching to Paypal... You still need to improve the overall stability of Instagram and posting... It’s not reliable and we have to babysit this process.
+## 6                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    Great platform - we have decided to move in a different direction with social that involves more direct engagement with individuals and less \\&quot;curated posts\\&quot;.  It&#39;s been a great ride with Buffer!  \\n\\nThanks.
+## 7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               Not being able to tag/link other contacts in posts is a real show stopper.
+## 8                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        I have stopped using a planning service and prefer to just post myself for now to save the money.
+## 9                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          Like Buffer - but needed to go in a different direction. Found the ability to archive and reuse posts too critical to workflow.
+## 10                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   I&#39;m constantly having to manually post items and \\&quot;re-authorize\\&quot; pages on Buffer. I&#39;ve had enough.</code></pre>
+<p>These run the gambit – people switching services, costs, bugs, profile connection, etc.</p>
+<p>Let’s create the same change plots as above, but this time for the Awesome downgrade survey.</p>
+<pre class="r"><code># plot change words for awesome survey
+plot_change(&quot;awesome_downgrade_survey&quot;) + labs(subtitle = &quot;Awesome Churn Survey&quot;)</code></pre>
+<p><img src="/blog/revisiting-churn-surveys_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+<p>There are a couple interesting things here. It seems that Buffer “lacks” some features, and some people might have closed their businesses. Let’s look at some responses that include the term “active”.</p>
+<pre class="r"><code># get responses with &#39;active&#39;
+responses %&gt;% 
+  filter(type == &#39;awesome_downgrade_survey&#39; &amp; tolower(details) %like% &#39;active&#39;) %&gt;% 
+  select(details) %&gt;% 
+  head(10)</code></pre>
+<pre><code>##                                                                                                                                                                                                                                                                                                                                                details
+## 1                                                                                                                                                                                                                                                                                                                        I&#39;m not actively using Buffer
+## 2                                                                                                                                                                                                        I&#39;m not currently actively managing clients&#39; accounts, am taking a bit of a break. But I&#39;ll definitely be back when I do - I LOVE Buffer! :-)
+## 3                                                                                                                                                                                                                                                    I switched to crowd fire, it&#39;s a little more interactive and reminds me to do social media stuff.
+## 4  I was getting lots of errors and needed to keep. Reconnecting my profiles and when I deleted them. And tried to add them back it said I needed to upgrade to add more profiles when I had 8 active on an awesome plan with 10 slots... Please help. I do not want to switch to another service but may do so if these problems are not resolved.\\n
+## 5                                                                                                                                                                                            I love buffer but the accounts I&#39;m using it for aren&#39;t as active any more so it&#39;s not worth me spending money on. Don&#39;t worry, it&#39;s not you, it&#39;s me! :) 
+## 6                                                                                                                                                                                             Switching to ContentStudio. Does the same plus much more. I paid like $59 for lifetime access (early adopter promo). Their development is crazy active. 
+## 7                                                                                                                                                                                                                                                                                                                     Not active enough at the moment.
+## 8                                                                                                                                                                                                                                                            I&#39;m not as active as I should be on social media, so I don&#39;t use the potential of Buffer.
+## 9                                                                                                                                                                                                                                                                                                   I have someone else actively updating my LinkedIn 
+## 10                                                                                                                                                                                                                                                                                                            Not so active anymore on social media...</code></pre>
+<p>It appears that users are telling us that they are not active enough on social media! I wonder how much of this effect is under Buffer’s control, and what it means for the market for Buffer as a whole.</p>
+<p>Let’s move on to look at groups of words, instead of only looking at single terms.</p>
+<div id="n-grams" class="section level3">
+<h3>N-grams</h3>
+<p>What if we looked at groups of words instead of just single words? We can check which words tend to appear immediately after another, and which words tend to appear together in the same document.</p>
+<p>We’ve been using the <code>unnest_tokens</code> function to tokenize by word, but we can also use the function to tokenize into consecutive sequences of words, called n-grams. By seeing how often word X is followed by word Y, we can then build a model of the relationships between them.</p>
+<p>We do this by adding the <code>token = &quot;ngrams&quot;</code> option to <code>unnest_tokens()</code>, and setting <code>n</code> to the number of words we wish to capture in each n-gram. When we set <code>n</code> to 2, we are examining groups of 2 consecutive words, often called “bigrams”:</p>
+<pre class="r"><code># unnest bigrams from responses
+bigrams &lt;- responses %&gt;%
+  unnest_tokens(bigram, details, token = &quot;ngrams&quot;, n = 2)
+
+# view the bigrams
+head(bigrams$bigram)</code></pre>
+<pre><code>## [1] &quot;we have&quot;         &quot;have choosen&quot;    &quot;choosen another&quot; &quot;another app&quot;    
+## [5] &quot;mainly 2&quot;        &quot;2 reasons&quot;</code></pre>
+<p>Great! Each token now is represented by a bigram. Let’s take a quick look at the most common bigrams</p>
+<pre class="r"><code># Count the most common bigrams
+bigrams %&gt;%
+  count(bigram, sort = TRUE) %&gt;% 
+  head(10)</code></pre>
+<pre><code>## # A tibble: 10 x 2
+##          bigram     n
+##           &lt;chr&gt; &lt;int&gt;
+##  1 social media  1186
+##  2    not using  1045
+##  3         i am  1011
+##  4     using it  1006
+##  5      i don&#39;t   980
+##  6       i have   909
+##  7    no longer   803
+##  8       use it   782
+##  9      need to   773
+## 10   don&#39;t need   710</code></pre>
+<p>As we might expect, a lot of the most common bigrams are groups of common words. This is a useful time to use tidyr’s <code>separate()</code>, which splits a column into multiple based on a delimiter. This lets us separate it into two columns, “word1” and “word2”, at which point we can remove cases where either is a stop-word.</p>
+<pre class="r"><code># separate words in bigrams
+separated &lt;- bigrams %&gt;%
+  separate(bigram, c(&quot;word1&quot;, &quot;word2&quot;), sep = &quot; &quot;)
+
+# define our own stop words
+word &lt;- c(&quot;i&quot;, &quot;i&#39;m&quot;, &quot;it&quot;, &quot;the&quot;, &quot;at&quot;, &quot;to&quot;, &quot;right&quot;, &quot;just&quot;, &quot;to&quot;, &quot;a&quot;, &quot;an&quot;,
+          &quot;that&quot;, &quot;but&quot;, &quot;as&quot;, &quot;so&quot;, &quot;will&quot;, &quot;for&quot;, &quot;longer&quot;, &quot;i&#39;ll&quot;, &quot;of&quot;, &quot;my&quot;,
+          &quot;n&quot;, &quot;do&quot;, &quot;did&quot;, &quot;am&quot;, &quot;with&quot;, &quot;been&quot;, &quot;and&quot;, &quot;we&quot;)
+
+# create tibble of stop words
+stopwords &lt;- tibble(word)
+
+# filter out stop-words
+filtered &lt;- separated %&gt;%
+  filter(!word1 %in% stopwords$word) %&gt;%
+  filter(!word2 %in% stopwords$word)
+
+# calculate new bigram counts
+bigram_counts &lt;- filtered %&gt;% 
+  count(word1, word2, sort = TRUE)
+
+head(bigram_counts)</code></pre>
+<pre><code>## # A tibble: 6 x 3
+##     word1 word2     n
+##     &lt;chr&gt; &lt;chr&gt; &lt;int&gt;
+## 1  social media  1186
+## 2     not using  1045
+## 3   don&#39;t  need   710
+## 4      be  back   587
+## 5   don&#39;t   use   474
+## 6 awesome  plan   438</code></pre>
+<p>We can already glean some useful information from this. We’ll use tidyr’s <code>unite()</code> function to recombine the columns into one. Then we’ll plot the most common bigrams included in all of the surveys.</p>
+<p><img src="/blog/revisiting-churn-surveys_files/figure-html/unnamed-chunk-21-1.png" width="672" /></p>
+<p>The most common bigram is “social media”, which makes sense. It’s more interesting to see that the next two most common bigrams are “not using” and “don’t need”. This seems like a clear signal that Buffer wasn’t filling these users’ needs in one way or another, which led them to leaving the product.</p>
+<p>Bigrams like “be back”, “another account”, and “have another” indicate that these users either have another Buffer account, or need to stop using it only temporarily.</p>
+<p>A bigram can also be treated as a term in a document in the same way that we treated individual words. For example, we can look at the tf-idf of these trigrams across the surveys. These tf-idf values can be visualized within each segment, just as we did for single words earlier. We’ll exclude the Business downgrade (to Awesome) survey, because the sample is not large enough to give us anything useful.</p>
+<p><img src="/blog/revisiting-churn-surveys_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
+<p>Very interesting! We can spot themes much more easily here. People delete their Buffer accounts more because of account creation issues. Image uploads, cost, and need are themes more unique to the Business churn survey, and shceduling, FB groups, and upgrading again later are more unique to the Awesome churn survey.</p>
+</div>
+</div>
+<div id="visualizing-a-network-of-bigrams-with-ggraph" class="section level2">
+<h2>Visualizing a network of bigrams with ggraph</h2>
+<p>As one common visualization, we can arrange the words into a network, or “graph.” Here we’ll be referring to a “graph” not in the sense of a visualization, but as a combination of connected nodes. A graph can be constructed from a tidy object since it has three variables:</p>
+<ul>
+<li>from: the node an edge is coming from</li>
+<li>to: the node an edge is going towards</li>
+<li>weight: A numeric value associated with each edge</li>
+</ul>
+<p>The <code>igraph</code> package has many powerful functions for manipulating and analyzing networks. One way to create an igraph object from tidy data is the <code>graph_from_data_frame()</code> function, which takes a data frame of edges with columns for “from”, “to”, and edge attributes (in this case n):</p>
+<p>Let’s create a bigram graph object.</p>
+<pre class="r"><code># filter for only relatively common combinations
+bigram_graph &lt;- bigram_counts %&gt;%
+  filter(n &gt; 80) %&gt;%
+  graph_from_data_frame()
+
+bigram_graph</code></pre>
+<pre><code>## IGRAPH DN-- 86 91 -- 
+## + attr: name (v/c), n (e/n)
+## + edges (vertex names):
+##  [1] social  -&gt;media     not     -&gt;using     don&#39;t   -&gt;need     
+##  [4] be      -&gt;back      don&#39;t   -&gt;use       awesome -&gt;plan     
+##  [7] thank   -&gt;you       using   -&gt;buffer    love    -&gt;buffer   
+## [10] too     -&gt;expensive don&#39;t   -&gt;have      buffer  -&gt;is       
+## [13] is      -&gt;not       another -&gt;account   use     -&gt;buffer   
+## [16] you     -&gt;guys      business-&gt;plan      come    -&gt;back     
+## [19] this    -&gt;account   more    -&gt;than      signed  -&gt;up       
+## [22] be      -&gt;able      this    -&gt;time      buffer  -&gt;account  
+## + ... omitted several edges</code></pre>
+<p>We can convert an igraph object into a ggraph with the ggraph function, after which we add layers to it, much like layers are added in ggplot2. For example, for a basic graph we need to add three layers: nodes, edges, and text.</p>
+<p><img src="/blog/revisiting-churn-surveys_files/figure-html/unnamed-chunk-24-1.png" width="672" /></p>
+<p>This is a visualization of a <strong>Markov chain</strong>, a model in text processing. In a Markov chain, each choice of word depends only on the previous word. In this case, a random generator following this model might spit out “buffer”, then “is”, then “great”, by following each word to the most common words that follow it. To make the visualization interpretable, I chose to show only the most common word to word connections. What can we learn from this graph?</p>
+<p>We can use this graph to visualize some details about the text structure. For example, we can see that “buffer” and “plan” form the centers of groups of nodes.</p>
+<p>We also see pairs or triplets along the outside that form common short phrases (“can’t afford”, “too expensive”, or “don’t need”).</p>
+<p>I see that “not” is at the center of a cluster of nodes. The most common connections are “not using” and “social media”. This is indicated by the darkest arrows.</p>
+<p>What would this graph look like if we only looked at the responses of the <em>business churn survey</em>?</p>
+<p><img src="/blog/revisiting-churn-surveys_files/figure-html/unnamed-chunk-25-1.png" width="672" /></p>
+<p>We can see that “don’t need” and “don’t use” are common themes again. Cost is another factor. There is a gratitude corner in the top left - cool! Competitors Hubspot and Sprout are also included.</p>
+</div>
+<div id="conclusions" class="section level2">
+<h2>Conclusions</h2>
+<p>It still feels important to figure out why users stop using and needing Buffer. In many cases it could be due to external factors like business needs, market forces, layoffs, but in other cases it could be due to Buffer itself. Perhaps Buffer could have a better engagement loop. Or perhaps Buffer could help users that become inactive by suggesting content to share.</p>
+<p>Another theme that appears repeatedly is cost. We know that the current pricing structure isn’t completely ideal, so it feels good to be working towards a more individualized structure over the next few months.</p>
+<p>Account issues, i.e. duplicate accounts, seem to be a big issue. We’re actively addressing those soon, so I’m optimistic that we’ll see less of that theme in future responses.</p>
+<p>There is a general theme of gratitude in these responses - “i love buffer” was a common phrase that appeared often in each survey. It’s comforting to know that people like the product and team – I hope that we’ll be able to use some of these learnings to give them a better experience. :)</p>
+</div>

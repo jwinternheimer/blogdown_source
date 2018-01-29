@@ -1,0 +1,511 @@
+---
+date: 2018-01-29T11:29:16-05:00
+type: "post"
+tags: []
+title: "Revisiting Churn Surveys"
+subtitle: "A Tidy Text Analysis"
+---
+
+Back in July, I [analyzed responses](https://jwinternheimer.github.io/blog/churn-survey-text-analysis/) from Buffer's churn surveys. In this post we'll recreate that analysis with more recent data. The goal is to see if general themes and trends have changed over time. It will also help remind us of the reasons why people choose to leave Buffer.
+
+```{r include = FALSE, message = FALSE, warning = FALSE}
+library(buffer)
+library(dplyr)
+library(ggplot2)
+library(tidytext)
+library(hrbrthemes)
+library(lubridate)
+library(tidyr)
+library(scales)
+library(broom)
+library(purrr)
+library(data.table)
+library(igraph)
+```
+
+We'll use data collected from four separate surveys that represents different types of churn:
+
+ - The _exit survey_ prompts users to explain why they are abandoning the Buffer product completely.
+ - The _business churn survey_ prompts users to explain why they are canceling their business subscriptions.
+ - The _awesome downgrade survey_ prompts users to explain why they are canceling their awesome subscriptions.
+ - The _business downgrade awesome survey_ asks why users downgrade from a Business to an Awesome subscription.
+ 
+We've gathered the data in [this look](https://looker.buffer.com/looks/3949). We can use the `get_look()` function from the `buffer` package to import all of the survey responses into a ataframe.
+
+```{r warning = FALSE, message = FALSE, eval = FALSE}
+# get data from looker
+responses <- get_look(3949)
+```
+
+Now we just need to clean the data a bit.
+
+```{r eval = FALSE}
+# rename columns
+colnames(responses) <- c('created_at', 'user_id', 'type', 'reason', 'specifics', 'details')
+
+# set reasons as character vectors
+responses$specifics <- as.character(responses$specifics)
+responses$details <- as.character(responses$details)
+```
+
+```{r include = FALSE}
+# save data
+# saveRDS(responses, file = 'churn_responses.rds')
+
+# read data
+responses <- readRDS('churn_responses.rds') %>% 
+  filter(user_id != '596fbd71b6b0cd6c1f21cfff')
+```
+
+Now we'll set the dates and remove null values.
+
+```{r warning = FALSE, message = FALSE}
+# set date as a date object
+responses$created_at <- as.Date(responses$created_at, format = '%Y-%m-%d')
+
+# get the month
+responses <- responses %>%
+  mutate(month = floor_date(created_at, unit = 'months'))
+
+# remove the reason and specifics columns
+responses$reason <- NULL
+responses$specifics <- NULL
+
+# remove NA values
+responses <- responses %>%
+  filter(details != "" & details != '[No reason supplied]' & details != 'false')
+```
+
+We're down to around 18 thousand responses from November 2015 until January 2018! We're now ready to do some exploratory analysis on the responses. 
+
+### Tidy Text
+We define the tidy text format as being a table with one-token-per-row. A token can be a word or an n-gram. Within our tidy text framework, we need to both break the comments into individual tokens and transform it to a tidy data structure. 
+
+To do this, we use tidytext’s `unnest_tokens()` function from the `tidytext` package. This breaks the churn survey responses into individual words and includes one word per row while retaining the attributes (survey type, user_id, etc) of that word.
+
+```{r}
+# unnest the tokens
+text_df <- responses %>%
+  unnest_tokens(word, details)
+```
+
+Now that the data is in one-word-per-row format, we can manipulate it with tidy tools like `dplyr`. Often in text analysis, we will want to remove stop words; stop words are words that are not useful for an analysis, typically extremely common words such as “the”, "of", "to", and so forth in English. We can remove stop words (kept in the tidytext dataset `stop_words`) with an `anti_join()`.
+
+First, let's remove a couple useful words from the `stop_words` dataset. We want to keep "not", "no", "too", "does", and "doesn't", "can" and "can't".
+```{r}
+# collect stop words
+data(stop_words)
+
+# words to keep
+keep_words <- c("not", "no", "too", "does", "doesn't", "can", "can't")
+
+# limit stop words
+stop_words <- stop_words %>% 
+  filter(!(word %in% keep_words))
+
+# remove stop words from our dataset
+text_df <- text_df %>%
+  anti_join(stop_words, by = "word")
+```
+
+We now have a tidy dataframe. :) 
+
+### Exploratory analysis
+Let's begin by plotting the most commonly occurring words in all of the churn surveys.
+
+```{r echo = FALSE}
+# plot most common words
+text_df %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 500) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col() +
+  theme_ipsum() +
+  labs(x = "", y = "", title = "Most Common Words", subtitle = "All Surveys") + 
+  coord_flip()
+```
+
+Certainly interesting, but not very useful. It would help to gather some context about each word. 
+
+### Diving deeper into word frequency
+Another way to analyze a term's frequency is to calculate the _inverse document frequency (tdf)_, which is defined as: 
+
+` idf(term) = ln(collection / collections containing term)`
+
+A term’s inverse document frequency (idf) decreases the weight for commonly used words and increases the weight for words that are used more sparsely. This can be combined with the overall term frequency to calculate a term’s `tf-idf` (the two quantities multiplied together), the frequency of a term adjusted for how rarely it is used.
+
+The idea of tf-idf is to find the important words for the content of each collection of words (the different surveys being the collections of words) by decreasing the weight for commonly used words and increasing the weight for words that are not used very much in an entire collection of documents, in this case the text of all of the surveys combined. We want to find words that are most unique to each type of churn survey.
+
+The `bind_tf_idf` function takes a tidy text dataset as input with one row per word, per document. One column (`word`) contains the terms, one column contains the documents (`type`), and the last necessary column contains the counts, how many times each document contains each term (`n`). 
+
+```{r}
+# calculate the frequency of words for each survey
+survey_words <- text_df %>%
+  count(type, word, sort = TRUE) %>%
+  ungroup()
+
+# calculate the total number of words for each survey
+total_words <- survey_words %>% 
+  group_by(type) %>% 
+  summarize(total = sum(n))
+
+# join the total words back into the survey_words data frame
+survey_words <- left_join(survey_words, total_words, by = "type") %>%
+  filter(type != "")
+
+# view data 
+head(survey_words)
+```
+
+There is one row in this data frame for each word-survey combination. `n` is the number of times that word is used in that survey and total is the total number of words in that survey's responses.
+
+### The `bind_tf_idf` function
+The idea of tf-idf is to find the important words for the content of each collection of comments by decreasing the weight for commonly used words and increasing the weight for words that are not used very much in an entire collection of documents, in this case all survey responses. We calculate `tf-idf` below.
+
+```{r}
+# calculate tf_idf
+survey_words <- survey_words %>%
+  bind_tf_idf(word, type, n)
+
+# view sample
+head(survey_words)
+```
+
+The `idf` and `tf_idf` will be 0 for common words like "the" and "a". Let's visualize high `tf_idf` words for each type of churn survey.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# tidy the words
+plot_words <- survey_words %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word))))
+
+# create the plot
+plot_words %>% 
+  group_by(type) %>% 
+  top_n(8) %>% 
+  ungroup %>%
+  ggplot(aes(word, tf_idf, fill = type)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = NULL, title = "TF-IDF") +
+  facet_wrap(~type, ncol = 2, scales = "free") +
+  coord_flip()
+```
+
+The words that appear in these graphs appear more frequently in the specific survey type than they do in the other surveys. It's interesting to see "finances" appear more commonly in the Awesome downgrade survey than the other surveys. The results under `business_churn_survey` do not appear to be very helpful, but prices (and price differences) are the top two terms listed in the business downgrade survey. The terms "duplicate", "address", and "created" indicate that account creation issues are a common reason for deleting Buffer accounts. Makes sense.
+
+We don't have much context and are required to speculate on what the meaning and emotion behind the words might be. It may be beneficial to look at groups of words to help us gather more information. We'll explore this by looking at n-grams later in the analysis.
+
+For now, let's explore how different topics have changed over time. 
+
+## Change over time
+What words and topics have become more frequent, or less frequent, over time? These could give us a sense of what has become more and less important in our customers' eyes.
+
+We can first count the number of times each word is used each month, and then use the `broom` package to fit a logistic regression model to examine whether the frequency of each word increases or decreases over time. Every term will then have a growth rate (as an exponential term) associated with it. 
+
+Let's start by defining a function that will plot the 12 terms with the highest coefficients of change for any particular survey type.
+
+```{r include = FALSE}
+# define function that plots change
+plot_change <- function(survey_type) {
+  
+  # get word totals
+  word_totals <- text_df %>%
+    filter(type == survey_type) %>% 
+    group_by(word) %>%
+    summarize(word_total = n()) %>%
+    filter(word_total >= 20)
+  
+  # get total word counts for each month
+  words_per_month <- text_df %>%
+    filter(type == survey_type) %>% 
+    group_by(month) %>%
+    summarize(month_total = n()) %>%
+    filter(month != min(month) & month != max(month))
+  
+  # count the total number of words by month
+  word_month_counts <- text_df %>%
+    filter(type == survey_type) %>% 
+    inner_join(word_totals, by = 'word') %>%
+    count(word, month) %>%
+    complete(word, month, fill = list(n = 0)) %>%
+    inner_join(words_per_month, by = "month") %>%
+    mutate(percent = n / month_total) %>%
+    mutate(year = year(month) + yday(month) / 365)
+  
+  
+  # create logistic regression model
+  mod <- ~ glm(cbind(n, month_total - n) ~ year, ., family = "binomial")
+
+  # calculate growth rates for each word
+  slopes <- word_month_counts %>%
+    nest(-word) %>%
+    mutate(model = map(data, mod)) %>%
+    unnest(map(model, tidy)) %>%
+    filter(term == "year") %>%
+    arrange(desc(estimate))
+  
+  # create the plot
+  change_plot <- slopes %>%
+    head(12) %>%
+    inner_join(word_month_counts, by = "word") %>%
+    mutate(word = reorder(word, -estimate)) %>%
+    ggplot(aes(month, n / month_total, color = word)) +
+    geom_line(show.legend = FALSE) +
+    scale_y_continuous(labels = percent_format()) +
+    facet_wrap(~ word, scales = "free_y") +
+    expand_limits(y = 0) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x = NULL, y = NULL, title = "12 Fastest Growing Terms")
+  
+  # return change plot
+  return(change_plot)
+  
+}
+```
+
+Now let's plot the terms with the highest slopes in the Business churn survey.
+
+```{r}
+# plot change words for business survey
+plot_change("business_churn_survey") + labs(subtitle = "Business Churn Survey")
+```
+
+It's interesting to see "client" and "clients" mentioned so frequently in the Business churn survey responses. I wonder what context they were used in? The term "instagram" seems to be coming up with increased frequency. I wonder if there are some improvements we can make to the Instagram Reminders process. The "afford" and "cost" terms indicate that price is still a factor for some folks. It's also quite interesting to see "scheduling" appear more frequently -- this makes sense, given that we've redesigned the posting schedule, but it is useful to know that it is causing people to churn. 
+
+Let's look at a few of the business churn survey responses that include "client".
+
+```{r}
+# get responses with 'client'
+responses %>% 
+  filter(type == 'business_churn_survey' & tolower(details) %like% 'client') %>% 
+  select(details) %>% 
+  head(10)
+```
+
+Interestingly, it seems like there are a couple themes: users explaining problems with Buffer in the context of what their clients need, and people who lost clients no longer needing or affording Buffer. Makes sense. Let's try to get a feel for why people include "post" in their responses.
+
+```{r}
+# get responses with 'post'
+responses %>% 
+  filter(type == 'business_churn_survey' & tolower(details) %like% 'post') %>% 
+  select(details) %>% 
+  head(10)
+```
+
+These run the gambit -- people switching services, costs, bugs, profile connection, etc.
+
+Let's create the same change plots as above, but this time for the Awesome downgrade survey.
+
+```{r}
+# plot change words for awesome survey
+plot_change("awesome_downgrade_survey") + labs(subtitle = "Awesome Churn Survey")
+```
+
+There are a couple interesting things here. It seems that Buffer "lacks" some features, and some people might have closed their businesses. Let's look at some responses that include the term "active". 
+
+```{r}
+# get responses with 'active'
+responses %>% 
+  filter(type == 'awesome_downgrade_survey' & tolower(details) %like% 'active') %>% 
+  select(details) %>% 
+  head(10)
+```
+
+It appears that users are telling us that they are not active enough on social media! I wonder how much of this effect is under Buffer's control, and what it means for the market for Buffer as a whole. 
+
+Let's move on to look at groups of words, instead of only looking at single terms.
+
+### N-grams
+What if we looked at groups of words instead of just single words? We can check which words tend to appear immediately after another, and which words tend to appear together in the same document.
+
+We’ve been using the `unnest_tokens` function to tokenize by word, but we can also use the function to tokenize into consecutive sequences of words, called n-grams. By seeing how often word X is followed by word Y, we can then build a model of the relationships between them.
+
+We do this by adding the `token = "ngrams"` option to `unnest_tokens()`, and setting `n` to the number of words we wish to capture in each n-gram. When we set `n` to 2, we are examining groups of 2 consecutive words, often called “bigrams”:
+
+```{r}
+# unnest bigrams from responses
+bigrams <- responses %>%
+  unnest_tokens(bigram, details, token = "ngrams", n = 2)
+
+# view the bigrams
+head(bigrams$bigram)
+```
+
+Great! Each token now is represented by a bigram. Let's take a quick look at the most common bigrams
+
+```{r}
+# Count the most common bigrams
+bigrams %>%
+  count(bigram, sort = TRUE) %>% 
+  head(10)
+```
+
+As we might expect, a lot of the most common bigrams are groups of common words. This is a useful time to use tidyr’s `separate()`, which splits a column into multiple based on a delimiter. This lets us separate it into two columns, “word1” and “word2”, at which point we can remove cases where either is a stop-word.
+
+```{r}
+# separate words in bigrams
+separated <- bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+# define our own stop words
+word <- c("i", "i'm", "it", "the", "at", "to", "right", "just", "to", "a", "an",
+          "that", "but", "as", "so", "will", "for", "longer", "i'll", "of", "my",
+          "n", "do", "did", "am", "with", "been", "and", "we")
+
+# create tibble of stop words
+stopwords <- tibble(word)
+
+# filter out stop-words
+filtered <- separated %>%
+  filter(!word1 %in% stopwords$word) %>%
+  filter(!word2 %in% stopwords$word)
+
+# calculate new bigram counts
+bigram_counts <- filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+head(bigram_counts)
+```
+
+We can already glean some useful information from this. We'll use tidyr’s `unite()` function to recombine the columns into one. Then we'll plot the most common bigrams included in all of the surveys.
+
+```{r echo = FALSE}
+# reunite the words
+bigrams_united <- filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+# plot the most common bigrams
+bigrams_united %>%
+  count(bigram, sort = TRUE) %>%
+  filter(n > 200) %>%
+  mutate(bigram = reorder(bigram, n)) %>%
+  ggplot(aes(bigram, n)) +
+  geom_col() +
+  theme_ipsum() +
+  labs(x = "", y = "", title = "Most Common Bigrams") + 
+  coord_flip()
+```
+
+The most common bigram is "social media", which makes sense. It's more interesting to see that the next two most common bigrams are "not using" and "don't need". This seems like a clear signal that Buffer wasn't filling these users' needs in one way or another, which led them to leaving the product.
+
+Bigrams like "be back", "another account", and "have another" indicate that these users either have another Buffer account, or need to stop using it only temporarily.
+
+A bigram can also be treated as a term in a document in the same way that we treated individual words. For example, we can look at the tf-idf of these trigrams across the surveys. These tf-idf values can be visualized within each segment, just as we did for single words earlier. We'll exclude the Business downgrade (to Awesome) survey, because the sample is not large enough to give us anything useful.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+# calculate tf_idf for bigrams
+bigram_tf_idf <- bigrams_united %>%
+  count(type, bigram) %>%
+  bind_tf_idf(bigram, type, n) %>%
+  arrange(desc(tf_idf))
+
+# tidy the bigrams
+plot_bigrams <- bigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(bigram = factor(bigram, levels = rev(unique(bigram))))
+
+# create the plot
+plot_bigrams %>% 
+  filter(type != 'business_downgrade_awesome_survey') %>% 
+  group_by(type) %>% 
+  top_n(5) %>% 
+  ungroup %>%
+  ggplot(aes(reorder(bigram, tf_idf), tf_idf, fill = type)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = NULL, title = "TD-IDF") +
+  facet_wrap(~type, ncol = 2, scales = "free") +
+  coord_flip()
+```
+
+Very interesting! We can spot themes much more easily here. People delete their Buffer accounts more because of account creation issues. Image uploads, cost, and need are themes more unique to the Business churn survey, and shceduling, FB groups, and upgrading again later are more unique to the Awesome churn survey.
+
+## Visualizing a network of bigrams with ggraph
+As one common visualization, we can arrange the words into a network, or “graph.” Here we’ll be referring to a “graph” not in the sense of a visualization, but as a combination of connected nodes. A graph can be constructed from a tidy object since it has three variables:
+
+ - from: the node an edge is coming from
+ - to: the node an edge is going towards
+ - weight: A numeric value associated with each edge
+ 
+The `igraph` package has many powerful functions for manipulating and analyzing networks. One way to create an igraph object from tidy data is the `graph_from_data_frame()` function, which takes a data frame of edges with columns for “from”, “to”, and edge attributes (in this case n):
+
+Let's create a bigram graph object.
+
+```{r}
+# filter for only relatively common combinations
+bigram_graph <- bigram_counts %>%
+  filter(n > 80) %>%
+  graph_from_data_frame()
+
+bigram_graph
+```
+
+We can convert an igraph object into a ggraph with the ggraph function, after which we add layers to it, much like layers are added in ggplot2. For example, for a basic graph we need to add three layers: nodes, edges, and text.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+library(ggraph)
+
+# Set seed for reproducible graph
+set.seed(2017)
+
+# Set the error features
+a <- grid::arrow(type = "closed", length = unit(.1, "inches"))
+
+# Create the graph
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = F, arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 3) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
+
+This is a visualization of a **Markov chain**, a model in text processing. In a Markov chain, each choice of word depends only on the previous word. In this case, a random generator following this model might spit out "buffer", then "is", then "great", by following each word to the most common words that follow it. To make the visualization interpretable, I chose to show only the most common word to word connections. What can we learn from this graph? 
+
+We can use this graph to visualize some details about the text structure. For example, we can see that "buffer" and "plan" form the centers of groups of nodes. 
+
+We also see pairs or triplets along the outside that form common short phrases ("can't afford", "too expensive", or "don't need").
+
+I see that "not" is at the center of a cluster of nodes. The most common connections are "not using" and "social media". This is indicated by the darkest arrows.
+
+What would this graph look like if we only looked at the responses of the _business churn survey_?
+
+```{r echo = FALSE}
+# calculate new bigram counts for the business customers
+business_counts <- filtered %>% 
+  filter(type == "business_churn_survey") %>%
+  count(word1, word2, sort = TRUE)
+
+# filter for only relatively common combinations
+business_graph <- business_counts %>%
+  filter(n > 5) %>%
+  graph_from_data_frame()
+
+# set seed for reproducible graph
+set.seed(2016)
+
+# Set the error features
+a <- grid::arrow(type = "closed", length = unit(.1, "inches"))
+
+# Create the graph
+ggraph(business_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = F, arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightpink", size = 3) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
+
+We can see that "don't need" and "don't use" are common themes again. Cost is another factor. There is a gratitude corner in the top left - cool! Competitors Hubspot and Sprout are also included. 
+
+## Conclusions
+It still feels important to figure out why users stop using and needing Buffer. In many cases it could be due to external factors like business needs, market forces, layoffs, but in other cases it could be due to Buffer itself. Perhaps Buffer could have a better engagement loop. Or perhaps Buffer could help users that become inactive by suggesting content to share.
+
+Another theme that appears repeatedly is cost. We know that the current pricing structure isn't completely ideal, so it feels good to be working towards a more individualized structure over the next few months. 
+
+Account issues, i.e. duplicate accounts, seem to be a big issue. We're actively addressing those soon, so I'm optimistic that we'll see less of that theme in future responses.
+
+There is a general theme of gratitude in these responses - "i love buffer" was a common phrase that appeared often in each survey. It's comforting to know that people like the product and team -- I hope that we'll be able to use some of these learnings to give them a better experience. :) 
+
+```{r include = FALSE}
+# unload lubridate package
+detach("package:lubridate", unload=TRUE)
+```
