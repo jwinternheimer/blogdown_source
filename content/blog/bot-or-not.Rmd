@@ -2,7 +2,7 @@
 date: 2018-03-05T09:33:43-05:00
 type: "post"
 tags: []
-title: "Bot? Or Not?"
+title: "Bot Or No Bot?"
 subtitle: "Identifying Twitter bots with machine learning"
 ---
 
