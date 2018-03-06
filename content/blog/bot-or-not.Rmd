@@ -91,7 +91,7 @@ spammy <- c('BadAdviceDog', 'HakuiiParadise', 'SimsProbIems', 'iLikeVinesDaily',
             'nazeer_mumtaz', 'newsbreakph', 'sinceresexts', 'uNaz9', 'ocalastyle', 'ApparelPorn', 'jawned')
 
 # get botornot estimates
-data <- botornot(spammy)
+data <- botornot(spammy, fast = TRUE)
 
 # view prob ests
 data %>% arrange(desc(prob_bot))
