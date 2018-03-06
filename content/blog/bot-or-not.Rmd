@@ -8,6 +8,9 @@ subtitle: "Identifying Twitter bots with machine learning"
 
 I happened to come across [this Tweet](https://twitter.com/kearneymw/status/970070047073951744) from Mike Kearney about a new package called `botornot` that classifies Twitter profiles into two categories: "bot" or "not". 
 
+![](https://media.makeameme.org/created/bots-bots-9c4m68.jpg)
+
+
 After seeing this, I couldn't _not_ take it for a spin. Let's determine which of the Buffer team's profiles are most bot-like, and test the models on profiles that are known to be spammy accounts.
 
 ```{r warning = FALSE, message = FALSE}
@@ -68,7 +71,7 @@ Now we can employ the `botornot` function and arrange the profiles by most bot-l
 
 I'll obfuscate the usernames for privacy's sake, but they can easily be found by reproducing the steps in this analysis.
 
-```{r}
+```{r warning = FALSE, message = FALSE}
 # get bot probability estimates
 data <- botornot(users)
 
