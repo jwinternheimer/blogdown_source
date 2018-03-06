@@ -1,0 +1,102 @@
+---
+date: 2018-03-05T09:33:43-05:00
+type: "post"
+tags: []
+title: "Bot? Or Not?"
+subtitle: "Identifying Twitter bots with machine learning"
+---
+
+I happened to come across [this Tweet](https://twitter.com/kearneymw/status/970070047073951744) from Mike Kearney about a new package called `botornot` that classifies Twitter profiles into two categories: "bot" or "not". 
+
+After seeing this, I couldn't _not_ take it for a spin. Let's determine which of the Buffer team's profiles are most bot-like, and test the models on profiles that are known to be spammy accounts.
+
+```{r warning = FALSE, message = FALSE}
+# load libraries
+library(rtweet)
+library(dplyr)
+library(botornot)
+library(openssl)
+```
+
+We'll use the `rtweet` package to gather tweets from [the Buffer team Twitter list](https://twitter.com/buffer/lists/the-buffer-team).
+
+```{r include = FALSE, eval = FALSE}
+# whatever name you assigned to your created app
+appname <- "julian_rtweet_app"
+
+# api key
+key <- Sys.getenv("TWITTER_API_CLIENT_ID")
+
+# api secret
+secret <- Sys.getenv("TWITTER_API_CLIENT_SECRET")
+
+# create token named "twitter_token"
+twitter_token <- create_token(
+  app = appname,
+  consumer_key = key,
+  consumer_secret = secret)
+
+# path of home directory
+home_directory <- path.expand("~/")
+
+# combine with name for token
+file_name <- file.path(home_directory, "twitter_token.rds")
+
+# save token to home directory
+saveRDS(twitter_token, file = file_name)
+```
+
+```{r message = FALSE, warning = FALSE, eval = FALSE}
+# gather tweets
+tweets <- search_tweets("list:buffer/the-buffer-team", n = 5000)
+```
+
+```{r include = FALSE}
+# saveRDS(tweets, file = 'buffer_tweets.rds')
+tweets <- readRDS('buffer_tweets.rds')
+```
+
+Now we can gather the usernames from these tweets.
+
+```{r}
+# gather usernames
+users <- unique(tweets$screen_name)
+users
+```
+
+Now we can employ the `botornot` function and arrange the profiles by most bot-like to least. According to the package's [README](https://github.com/mkearney/botornot), the default (gradient boosted) model uses both users-level (bio, location, number of followers and friends, etc.) and tweets-level (number of hashtags, mentions, capital letters, etc. in a user’s most recent 100 tweets) data to estimate the probability that users are bots. For larger data sets, this method can be quite slow. Due to Twitter’s REST API rate limits, users are limited to only 180 estimates per every 15 minutes.
+
+I'll obfuscate the usernames for privacy's sake, but they can easily be found by reproducing the steps in this analysis.
+
+```{r}
+# get bot probability estimates
+data <- botornot(users)
+
+# hash the usernames
+data$user_hash <- md5(data$user)
+
+# arrange by prob ests
+data %>% 
+  arrange(desc(prob_bot)) %>% 
+  select(-user)
+```
+
+Ok.. the model assigns a probability of over 90% to five of my teammates. Working for a company like Buffer, I can understand why this model might assign a higher-than-average probability of being a bot account. We tend to share many articles, use hashtags, and retweet a lot. Even so, these probabilities seem to be a bit too high for accounts that I know not to be bots. :) 
+
+Let's now look at a group of accounts that are indeed spammy, and test the model's output.
+
+```{r warning = FALSE, message = FALSE}
+# list spammy accounts
+spammy <- c('BadAdviceDog', 'HakuiiParadise', 'SimsProbIems', 'iLikeVinesDaily', '0GM10S',
+            'nazeer_mumtaz', 'newsbreakph', 'sinceresexts', 'uNaz9', 'ocalastyle', 'ApparelPorn', 'jawned')
+
+# get botornot estimates
+data <- botornot(spammy)
+
+# view prob ests
+data %>% arrange(desc(prob_bot))
+```
+
+Interestingly, these accounts seem to have a lower average probability of being bots than the Buffer team's accounts! 
+
+All in all, it's been fun to play with this package. I could imagine something like this being used as a weighted input in a spam prediction model, however I'll wait a while before putting it into production. :) 
