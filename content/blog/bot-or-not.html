@@ -8,47 +8,61 @@ subtitle: "Identifying Twitter bots with machine learning"
 
 
 
-<p>I happened to come across <a href="https://twitter.com/kearneymw/status/970070047073951744">this Tweet</a> from Mike Kearney about a new package called <code>botornot</code> that classifies Twitter profiles into two categories: “bot” or “not”.</p>
+<p>I recently happened across <a href="https://twitter.com/kearneymw/status/970070047073951744">this Tweet</a> from Mike Kearney about his new R package called <code>botornot</code>. It’s core function is to classify Twitter profiles into two categories: “bot” or “not”.</p>
 <div class="figure">
 <img src="https://media.makeameme.org/created/bots-bots-9c4m68.jpg" />
 
 </div>
-<p>After seeing this, I couldn’t <em>not</em> take it for a spin. Let’s determine which of the Buffer team’s profiles are most bot-like, and test the models on profiles that are known to be spammy accounts.</p>
+<p>Having seen the tweet, I couldn’t <em>not</em> take the package for a spin. In this post we’ll try to determine which of the Buffer team’s Twitter accounts are most bot-like. We’ll also test the <code>botornot</code> model on accounts that we know to be spammy.</p>
+<div id="data-collection" class="section level3">
+<h3>Data Collection</h3>
+<p>The <code>botornot</code> function requires a list of Twitter account handles. To gather the Buffer team’s accounts, we can collect recent tweets from <a href="https://twitter.com/buffer/lists/the-buffer-team">the Buffer team Twitter list</a> using the <code>rtweet</code> package, and extract the <code>screen_name</code> field from the collected tweets. But first we’ll load the libraries we need for this analysis.</p>
 <pre class="r"><code># load libraries
 library(rtweet)
 library(dplyr)
 library(botornot)
-library(openssl)</code></pre>
-<p>We’ll use the <code>rtweet</code> package to gather tweets from <a href="https://twitter.com/buffer/lists/the-buffer-team">the Buffer team Twitter list</a>.</p>
+library(openssl)
+library(ggplot2)
+library(hrbrthemes)
+library(scales)</code></pre>
+<p>This query only returns data from the past 6-9 days.</p>
 <pre class="r"><code># gather tweets
-tweets &lt;- search_tweets(&quot;list:buffer/the-buffer-team&quot;, n = 5000)</code></pre>
-<p>Now we can gather the usernames from these tweets.</p>
+tweets &lt;- search_tweets(&quot;list:buffer/the-buffer-team&quot;, n = 10000)</code></pre>
+<p>Now we can gather the account names from the <code>tweets</code> dataframe.</p>
 <pre class="r"><code># gather usernames
 users &lt;- unique(tweets$screen_name)
 users</code></pre>
-<pre><code>##  [1] &quot;hjharnis&quot;        &quot;Mike_Eck&quot;        &quot;Brian_G_Peters&quot; 
-##  [4] &quot;danmulc1&quot;        &quot;katie_womers&quot;    &quot;Maxberthelot&quot;   
-##  [7] &quot;kevanlee&quot;        &quot;alfred_lua&quot;      &quot;kellybakes&quot;     
-## [10] &quot;tiggreen&quot;        &quot;kiriappeee&quot;      &quot;eric_khun&quot;      
-## [13] &quot;Kalendium&quot;       &quot;hitherejoe&quot;      &quot;thedarcypeters&quot; 
-## [16] &quot;karamcnair&quot;      &quot;joelgascoigne&quot;   &quot;suprasannam&quot;    
-## [19] &quot;A_Farmer&quot;        &quot;emplums&quot;         &quot;ay8s&quot;           
-## [22] &quot;TTGonda&quot;         &quot;RoyOlende&quot;       &quot;moreofmorris&quot;   
-## [25] &quot;bufferreply&quot;     &quot;JordanMorgan10&quot;  &quot;bufferdevs&quot;     
-## [28] &quot;Ashread_&quot;        &quot;julietchen&quot;      &quot;stevenc81&quot;      
-## [31] &quot;hamstu&quot;          &quot;julheimer&quot;       &quot;KarinnaBriseno&quot; 
-## [34] &quot;bufferlove&quot;      &quot;no_good3r&quot;       &quot;redman&quot;         
-## [37] &quot;courtneyseiter&quot;  &quot;goku2&quot;           &quot;josemdev&quot;       
-## [40] &quot;juliabreathes&quot;   &quot;davechapman&quot;     &quot;twanlass&quot;       
-## [43] &quot;FedericoWeber&quot;   &quot;CaroKopp&quot;        &quot;parmly&quot;         
-## [46] &quot;natemhanson&quot;     &quot;hailleymari&quot;     &quot;michael_erasmus&quot;
-## [49] &quot;Bonnie_Hugs&quot;     &quot;mwermuth&quot;        &quot;hannah_voice&quot;   
-## [52] &quot;ariellemargot&quot;   &quot;djfarrelly&quot;      &quot;toddba&quot;         
-## [55] &quot;stephe_lee&quot;      &quot;jntrry&quot;          &quot;nystroms&quot;       
-## [58] &quot;BorisTroja&quot;      &quot;nmillerbooks&quot;    &quot;mickmahady&quot;     
-## [61] &quot;ivanazuber&quot;      &quot;_pioul&quot;          &quot;OCallaghanDavid&quot;</code></pre>
-<p>Now we can employ the <code>botornot</code> function and arrange the profiles by most bot-like to least. According to the package’s <a href="https://github.com/mkearney/botornot">README</a>, the default (gradient boosted) model uses both users-level (bio, location, number of followers and friends, etc.) and tweets-level (number of hashtags, mentions, capital letters, etc. in a user’s most recent 100 tweets) data to estimate the probability that users are bots. For larger data sets, this method can be quite slow. Due to Twitter’s REST API rate limits, users are limited to only 180 estimates per every 15 minutes.</p>
-<p>I’ll obfuscate the usernames for privacy’s sake, but they can easily be found by reproducing the steps in this analysis.</p>
+<pre><code>##  [1] &quot;julheimer&quot;       &quot;julietchen&quot;      &quot;alfred_lua&quot;     
+##  [4] &quot;Mike_Eck&quot;        &quot;Maxberthelot&quot;    &quot;davechapman&quot;    
+##  [7] &quot;Kalendium&quot;       &quot;thedarcypeters&quot;  &quot;eric_khun&quot;      
+## [10] &quot;moreofmorris&quot;    &quot;Brian_G_Peters&quot;  &quot;hitherejoe&quot;     
+## [13] &quot;kiriappeee&quot;      &quot;stephe_lee&quot;      &quot;karamcnair&quot;     
+## [16] &quot;hjharnis&quot;        &quot;Semakaweezay&quot;    &quot;juliabreathes&quot;  
+## [19] &quot;joelgascoigne&quot;   &quot;RoyOlende&quot;       &quot;hailleymari&quot;    
+## [22] &quot;ay8s&quot;            &quot;Bonnie_Hugs&quot;     &quot;kellybakes&quot;     
+## [25] &quot;emplums&quot;         &quot;hamstu&quot;          &quot;A_Farmer&quot;       
+## [28] &quot;tiggreen&quot;        &quot;kevanlee&quot;        &quot;mwermuth&quot;       
+## [31] &quot;danmulc1&quot;        &quot;katie_womers&quot;    &quot;suprasannam&quot;    
+## [34] &quot;TTGonda&quot;         &quot;bufferreply&quot;     &quot;JordanMorgan10&quot; 
+## [37] &quot;bufferdevs&quot;      &quot;Ashread_&quot;        &quot;stevenc81&quot;      
+## [40] &quot;KarinnaBriseno&quot;  &quot;bufferlove&quot;      &quot;no_good3r&quot;      
+## [43] &quot;redman&quot;          &quot;courtneyseiter&quot;  &quot;goku2&quot;          
+## [46] &quot;josemdev&quot;        &quot;twanlass&quot;        &quot;FedericoWeber&quot;  
+## [49] &quot;CaroKopp&quot;        &quot;parmly&quot;          &quot;natemhanson&quot;    
+## [52] &quot;michael_erasmus&quot; &quot;hannah_voice&quot;    &quot;ariellemargot&quot;  
+## [55] &quot;djfarrelly&quot;      &quot;toddba&quot;          &quot;jntrry&quot;         
+## [58] &quot;nystroms&quot;        &quot;BorisTroja&quot;      &quot;nmillerbooks&quot;   
+## [61] &quot;mickmahady&quot;      &quot;ivanazuber&quot;      &quot;_pioul&quot;         
+## [64] &quot;OCallaghanDavid&quot;</code></pre>
+<p>Great, most of the team is present in this list. Interestingly, accounts like <code>@bufferdevs</code> and <code>@bufferlove</code> are also included. It will be interesting to see if they are assigned high probabilities of being bots.</p>
+</div>
+<div id="the-anti-turing-test" class="section level3">
+<h3>The Anti Turing Test</h3>
+<p>Now, let’s see if these humans can convince my algorithm that they are not bots. At this point it may be useful to explain how the model actually works.</p>
+<p>According to the package’s <a href="https://github.com/mkearney/botornot">README</a>, the default gradient boosted model uses both users-level (bio, location, number of followers and friends, etc.) and tweets-level (number of hashtags, mentions, capital letters, etc. in a user’s most recent 100 tweets) data to estimate the probability that users are bots.</p>
+<p>Looking at the <a href="https://github.com/mkearney/botornot/blob/master/R/features.R#L34-L65">package’s code</a>, we can see that the model’s features also include the number of tweets sent from different clients (iphone, web, android, IFTTT, etc.), whether the profile is verified, the tweets-to-follower ratio, the number of years that the account has been on Twitter, and a few other interesting characteristics.</p>
+<p>I’ll obfuscate the account handles for privacy’s sake, but they can easily be found by reproducing the steps in this analysis or by using a MD5 reverse lookup.</p>
+<p>Now let’s calculate the probabilities for the Buffer team’s accounts and sort them from most to least bot-like.</p>
 <pre class="r"><code># get bot probability estimates
 data &lt;- botornot(users)
 
@@ -59,43 +73,83 @@ data$user_hash &lt;- md5(data$user)
 data %&gt;% 
   arrange(desc(prob_bot)) %&gt;% 
   select(-user)</code></pre>
-<pre><code>## # A tibble: 63 x 2
+<pre><code>## # A tibble: 64 x 2
 ##    prob_bot user_hash                       
 ##       &lt;dbl&gt; &lt;chr&gt;                           
 ##  1    0.999 3ff40b69a60e6210f3cbda8db1cb4ae2
-##  2    0.988 3e921417f41b66f1c24862710537f192
+##  2    0.989 3e921417f41b66f1c24862710537f192
 ##  3    0.985 d093563010eedd85801769f91909265d
 ##  4    0.964 712a4384e6681bd521c5266e16789c29
 ##  5    0.906 0edb7ec9098076761bd14c9c3ca97bd3
 ##  6    0.899 6ed84e511f386eb4942cfab089b02602
 ##  7    0.897 db82005412c13e740c03860b29aec7b7
 ##  8    0.894 8dc5886d5c56e75b89ab191e0e5958cd
-##  9    0.889 a1d8e95101f88a8d7ef65d5106b7183c
-## 10    0.886 fa3d30c0919008e2ab8b5e87192a13ac
-## # ... with 53 more rows</code></pre>
-<p>Ok.. the model assigns a probability of over 90% to five of my teammates. Working for a company like Buffer, I can understand why this model might assign a higher-than-average probability of being a bot account. We tend to share many articles, use hashtags, and retweet a lot. Even so, these probabilities seem to be a bit too high for accounts that I know not to be bots. :)</p>
-<p>Let’s now look at a group of accounts that are indeed spammy, and test the model’s output.</p>
-<pre class="r"><code># list spammy accounts
-spammy &lt;- c(&#39;BadAdviceDog&#39;, &#39;HakuiiParadise&#39;, &#39;SimsProbIems&#39;, &#39;iLikeVinesDaily&#39;, &#39;0GM10S&#39;,
-            &#39;nazeer_mumtaz&#39;, &#39;newsbreakph&#39;, &#39;sinceresexts&#39;, &#39;uNaz9&#39;, &#39;ocalastyle&#39;, &#39;ApparelPorn&#39;, &#39;jawned&#39;)
+##  9    0.891 a1d8e95101f88a8d7ef65d5106b7183c
+## 10    0.868 fa3d30c0919008e2ab8b5e87192a13ac
+## # ... with 54 more rows</code></pre>
+<p>The model assigns surprisingly high probabilities to many of us. The account <span class="citation">[@bufferlove]</span>(<a href="https://twitter.com/bufferlove" class="uri">https://twitter.com/bufferlove</a>) is assigned a 99.9% probability of being a bot – the <code>@bufferdevs</code> and <code>@bufferreply</code> accounts are also given probabilities of 90% or higher. Verified accounts and accounts with many followers seem less likely to be bots.</p>
+<p>Working for a company like Buffer, I can understand why this model might assign a higher-than-average probability of being a bot. We tend to share many articles, use hashtags, and retweet a lot. I suspect that scheduling link posts with Buffer greatly increases the probability of being classified as a bot by this model. Even so, these probabilities seem to be a bit too high for accounts that I know not to be bots. :)</p>
+<p>Let’s gather more data and investigate further. We have tweet-level data in the <code>tweets</code> dataframe – let’s gather user-level data now. We’ll do this with the <code>search_users</code> function. We’ll search for users with “<span class="citation">@buffer</span>” in their bio and save it in the <code>users</code> dataframe.</p>
+<pre class="r"><code># search for users
+users &lt;- search_users(&quot;@buffer&quot;)</code></pre>
+<p>Now we can join <code>users</code> to the <code>data</code> dataframe on the <code>screen_name</code> field.</p>
+<pre class="r"><code># join dataframes
+buffer_users &lt;- data %&gt;% 
+  left_join(users, by = c(&quot;user&quot; = &quot;screen_name&quot;))</code></pre>
+<p>Now, let’s see how the probability of being a bot correlates with the number of followers that people have. We’ll leave our CEO, Joel (<span class="citation">@joelgascoigne</span>), out of this since he is such an outlier. Too dang famous!</p>
+<p><img src="/blog/bot-or-not_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>We can see that there is a negative correlation between follower count and bot probability. This makes sense – bots seem less likely to have lots of followers.</p>
+<p>Now, let’s look at the relationship between bot probability and the percentage of Tweets sent with Buffer. First we’ll calculate the proportion of tweets that were sent with Buffer for each user.</p>
+<pre class="r"><code># get Buffered tweets for each user
+by_user &lt;- tweets %&gt;% 
+  mutate(sent_with_buffer = source == &quot;Buffer&quot;) %&gt;% 
+  group_by(screen_name, sent_with_buffer) %&gt;% 
+  summarise(buffered_tweets = n_distinct(status_id)) %&gt;%
+  mutate(total_tweets = sum(buffered_tweets), 
+         percent_buffered = buffered_tweets / sum(buffered_tweets)) %&gt;% 
+  filter(sent_with_buffer == TRUE) %&gt;% 
+  select(-sent_with_buffer)
+
+# join to buffer_users dataframe
+buffer_users &lt;- buffer_users %&gt;% 
+  left_join(by_user, by = c(&#39;user&#39; = &#39;screen_name&#39;))
+
+# replace NAs with 0
+buffer_users$buffered_tweets[is.na(buffer_users$buffered_tweets)] &lt;- 0
+buffer_users$percent_buffered[is.na(buffer_users$percent_buffered)] &lt;- 0</code></pre>
+<p>Now let’s plot the bot probability by the percentage tweets Buffered.</p>
+<p><img src="/blog/bot-or-not_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>We can see that there is a positive correlation between the proportion of tweets Buffered and the probability of being a bot. This is interesting, but not totally unexpected.</p>
+</div>
+<div id="definitely-bots" class="section level3">
+<h3>Definitely Bots</h3>
+<p>Now let’s see how the model does with accounts we know to be bots. I just gathered some names from <a href="https://botwiki.org/tag/twitterbot/">this site</a>, which maintains a few lists of Twitter bots.</p>
+<pre class="r"><code># list bot accounts
+bots &lt;- c(&#39;tiny_raindrops_&#39;, &#39;KAFFEE_REMINDER&#39;, &#39;MYPRESIDENTIS&#39;, &#39;COLORISEBOT&#39;, &#39;OSSPBOT&#39;,
+            &#39;GITWISHES&#39;, &#39;SAYSTHEKREMLIN&#39;, &#39;NLPROVERBS&#39;, &#39;THEDOOMCLOCK&#39;, &#39;DAILYGLACIER&#39;)
 
 # get botornot estimates
-data &lt;- botornot(spammy, fast = TRUE)
+bot_data &lt;- botornot(bots)
 
 # view prob ests
-data %&gt;% arrange(desc(prob_bot))</code></pre>
+bot_data %&gt;% arrange(desc(prob_bot))</code></pre>
 <pre><code>## # A tibble: 10 x 2
 ##    user            prob_bot
 ##    &lt;chr&gt;              &lt;dbl&gt;
-##  1 nazeer_mumtaz     0.971 
-##  2 0GM10S            0.555 
-##  3 jawned            0.476 
-##  4 newsbreakph       0.318 
-##  5 BadAdviceDog      0.304 
-##  6 uNaz9             0.181 
-##  7 SimsProbIems      0.160 
-##  8 iLikeVinesDaily   0.0781
-##  9 HakuiiParadise    0.0691
-## 10 ocalastyle        0.0479</code></pre>
-<p>Interestingly, these accounts seem to have a lower average probability of being bots than the Buffer team’s accounts!</p>
-<p>All in all, it’s been fun to play with this package. I could imagine something like this being used as a weighted input in a spam prediction model, however I’ll wait a while before putting it into production. :)</p>
+##  1 tiny_raindrops_    1.000
+##  2 thedoomclock       0.998
+##  3 GitWishes          0.998
+##  4 MyPresidentIs      0.998
+##  5 kaffee_reminder    0.996
+##  6 osspbot            0.994
+##  7 saysthekremlin     0.987
+##  8 NlProverbs         0.983
+##  9 colorisebot        0.966
+## 10 dailyglacier       0.872</code></pre>
+<p>Surprise! They all have been assigned very high probabilities of being bots, because they are bots.</p>
+</div>
+<div id="conclusions" class="section level3">
+<h3>Conclusions</h3>
+<p>I’ve had a fun time playing with this package – thanks for following along. I could imagine something like this being used as a weighted input in a spam prediction model in the future, however the <code>botornot</code> model is imperfect in its current stage. We’ll continue to have some fun with it and will have to consider making some tweaks before we put it into production.</p>
+<p>Thanks for reading! Let me know if you have any thoughts or questions in the comments below!</p>
+</div>

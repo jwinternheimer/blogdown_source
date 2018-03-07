@@ -6,12 +6,14 @@ title: "Bot Or No Bot?"
 subtitle: "Identifying Twitter bots with machine learning"
 ---
 
-I happened to come across [this Tweet](https://twitter.com/kearneymw/status/970070047073951744) from Mike Kearney about a new package called `botornot` that classifies Twitter profiles into two categories: "bot" or "not". 
+I recently happened across [this Tweet](https://twitter.com/kearneymw/status/970070047073951744) from Mike Kearney about his new R package called `botornot`. It's core function is to classify Twitter profiles into two categories: "bot" or "not". 
 
 ![](https://media.makeameme.org/created/bots-bots-9c4m68.jpg)
 
+Having seen the tweet, I couldn't _not_ take the package for a spin. In this post we'll try to determine which of the Buffer team's Twitter accounts are most bot-like. We'll also test the `botornot` model on accounts that we know to be spammy.
 
-After seeing this, I couldn't _not_ take it for a spin. Let's determine which of the Buffer team's profiles are most bot-like, and test the models on profiles that are known to be spammy accounts.
+### Data Collection
+The `botornot` function requires a list of Twitter account handles. To gather the Buffer team's accounts, we can collect recent tweets from [the Buffer team Twitter list](https://twitter.com/buffer/lists/the-buffer-team) using the `rtweet` package, and extract the `screen_name` field from the collected tweets. But first we'll load the libraries we need for this analysis.
 
 ```{r warning = FALSE, message = FALSE}
 # load libraries
@@ -19,9 +21,10 @@ library(rtweet)
 library(dplyr)
 library(botornot)
 library(openssl)
+library(ggplot2)
+library(hrbrthemes)
+library(scales)
 ```
-
-We'll use the `rtweet` package to gather tweets from [the Buffer team Twitter list](https://twitter.com/buffer/lists/the-buffer-team).
 
 ```{r include = FALSE, eval = FALSE}
 # whatever name you assigned to your created app
@@ -49,9 +52,11 @@ file_name <- file.path(home_directory, "twitter_token.rds")
 saveRDS(twitter_token, file = file_name)
 ```
 
+This query only returns data from the past 6-9 days.
+
 ```{r message = FALSE, warning = FALSE, eval = FALSE}
 # gather tweets
-tweets <- search_tweets("list:buffer/the-buffer-team", n = 5000)
+tweets <- search_tweets("list:buffer/the-buffer-team", n = 10000)
 ```
 
 ```{r include = FALSE}
@@ -59,7 +64,7 @@ tweets <- search_tweets("list:buffer/the-buffer-team", n = 5000)
 tweets <- readRDS('buffer_tweets.rds')
 ```
 
-Now we can gather the usernames from these tweets.
+Now we can gather the account names from the `tweets` dataframe. 
 
 ```{r}
 # gather usernames
@@ -67,9 +72,18 @@ users <- unique(tweets$screen_name)
 users
 ```
 
-Now we can employ the `botornot` function and arrange the profiles by most bot-like to least. According to the package's [README](https://github.com/mkearney/botornot), the default (gradient boosted) model uses both users-level (bio, location, number of followers and friends, etc.) and tweets-level (number of hashtags, mentions, capital letters, etc. in a user’s most recent 100 tweets) data to estimate the probability that users are bots. For larger data sets, this method can be quite slow. Due to Twitter’s REST API rate limits, users are limited to only 180 estimates per every 15 minutes.
+Great, most of the team is present in this list. Interestingly, accounts like `@bufferdevs` and `@bufferlove` are also included. It will be interesting to see if they are assigned high probabilities of being bots. 
 
-I'll obfuscate the usernames for privacy's sake, but they can easily be found by reproducing the steps in this analysis.
+### The Anti Turing Test
+Now, let's see if these humans can convince my algorithm that they are not bots. At this point it may be useful to explain how the model actually works.
+
+According to the package's [README](https://github.com/mkearney/botornot), the default gradient boosted model uses both users-level (bio, location, number of followers and friends, etc.) and tweets-level (number of hashtags, mentions, capital letters, etc. in a user’s most recent 100 tweets) data to estimate the probability that users are bots. 
+
+Looking at the [package's code](https://github.com/mkearney/botornot/blob/master/R/features.R#L34-L65), we can see that the model's features also include the number of tweets sent from different clients (iphone, web, android, IFTTT, etc.), whether the profile is verified, the tweets-to-follower ratio, the number of years that the account has been on Twitter, and a few other interesting characteristics. 
+
+I'll obfuscate the account handles for privacy's sake, but they can easily be found by reproducing the steps in this analysis or by using a MD5 reverse lookup. 
+
+Now let's calculate the probabilities for the Buffer team's accounts and sort them from most to least bot-like.
 
 ```{r warning = FALSE, message = FALSE}
 # get bot probability estimates
@@ -84,22 +98,103 @@ data %>%
   select(-user)
 ```
 
-Ok.. the model assigns a probability of over 90% to five of my teammates. Working for a company like Buffer, I can understand why this model might assign a higher-than-average probability of being a bot account. We tend to share many articles, use hashtags, and retweet a lot. Even so, these probabilities seem to be a bit too high for accounts that I know not to be bots. :) 
+The model assigns surprisingly high probabilities to many of us. The account [@bufferlove](https://twitter.com/bufferlove) is assigned a 99.9% probability of being a bot -- the `@bufferdevs` and `@bufferreply` accounts are also given probabilities of 90% or higher. Verified accounts and accounts with many followers seem less likely to be bots.
 
-Let's now look at a group of accounts that are indeed spammy, and test the model's output.
+Working for a company like Buffer, I can understand why this model might assign a higher-than-average probability of being a bot. We tend to share many articles, use hashtags, and retweet a lot. I suspect that scheduling link posts with Buffer greatly increases the probability of being classified as a bot by this model. Even so, these probabilities seem to be a bit too high for accounts that I know not to be bots. :) 
 
-```{r warning = FALSE, message = FALSE}
-# list spammy accounts
-spammy <- c('BadAdviceDog', 'HakuiiParadise', 'SimsProbIems', 'iLikeVinesDaily', '0GM10S',
-            'nazeer_mumtaz', 'newsbreakph', 'sinceresexts', 'uNaz9', 'ocalastyle', 'ApparelPorn', 'jawned')
+Let's gather more data and investigate further. We have tweet-level data in the `tweets` dataframe -- let's gather user-level data now. We'll do this with the `search_users` function. We'll search for users with "@buffer" in their bio and save it in the `users` dataframe.
 
-# get botornot estimates
-data <- botornot(spammy, fast = TRUE)
-
-# view prob ests
-data %>% arrange(desc(prob_bot))
+```{r warning = FALSE, message = FALSE, eval = FALSE}
+# search for users
+users <- search_users("@buffer")
 ```
 
-Interestingly, these accounts seem to have a lower average probability of being bots than the Buffer team's accounts! 
+```{r include = FALSE}
+# saveRDS(users, file = 'buffer_users.rds')
+users <- readRDS('buffer_users.rds')
+```
 
-All in all, it's been fun to play with this package. I could imagine something like this being used as a weighted input in a spam prediction model, however I'll wait a while before putting it into production. :) 
+Now we can join `users` to the `data` dataframe on the `screen_name` field.
+
+```{r}
+# join dataframes
+buffer_users <- data %>% 
+  left_join(users, by = c("user" = "screen_name"))
+```
+
+Now, let's see how the probability of being a bot correlates with the number of followers that people have. We'll leave our CEO, Joel (@joelgascoigne), out of this since he is such an outlier. Too dang famous!
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+buffer_users %>% 
+  filter(user != 'joelgascoigne') %>% 
+  ggplot(aes(x = followers_count, y = prob_bot)) +
+  geom_point() +
+  stat_smooth(method = 'lm', se = FALSE) +
+  scale_y_continuous(labels = percent) +
+  theme_ipsum() +
+  labs(x = "Followers", y = NULL, title = "Probability of Being a Bot",
+       subtitle = "By Twitter Follower Count")
+```
+
+We can see that there is a negative correlation between follower count and bot probability. This makes sense -- bots seem less likely to have lots of followers. 
+
+Now, let's look at the relationship between bot probability and the percentage of Tweets sent with Buffer. First we'll calculate the proportion of tweets that were sent with Buffer for each user.
+
+```{r}
+# get Buffered tweets for each user
+by_user <- tweets %>% 
+  mutate(sent_with_buffer = source == "Buffer") %>% 
+  group_by(screen_name, sent_with_buffer) %>% 
+  summarise(buffered_tweets = n_distinct(status_id)) %>%
+  mutate(total_tweets = sum(buffered_tweets), 
+         percent_buffered = buffered_tweets / sum(buffered_tweets)) %>% 
+  filter(sent_with_buffer == TRUE) %>% 
+  select(-sent_with_buffer)
+
+# join to buffer_users dataframe
+buffer_users <- buffer_users %>% 
+  left_join(by_user, by = c('user' = 'screen_name'))
+
+# replace NAs with 0
+buffer_users$buffered_tweets[is.na(buffer_users$buffered_tweets)] <- 0
+buffer_users$percent_buffered[is.na(buffer_users$percent_buffered)] <- 0
+```
+
+Now let's plot the bot probability by the percentage tweets Buffered.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+buffer_users %>% 
+  filter(user != 'joelgascoigne') %>% 
+  ggplot(aes(x = percent_buffered, y = prob_bot)) +
+  geom_point() +
+  stat_smooth(method = 'lm', se = FALSE) +
+  scale_y_continuous(labels = percent) +
+  scale_x_continuous(labels = percent) +
+  theme_ipsum() +
+  labs(x = "Percent of Tweets Buffered", y = NULL, title = "Probability of Being a Bot",
+       subtitle = "By Percent of Tweets Buffered")
+```
+
+We can see that there is a positive correlation between the proportion of tweets Buffered and the probability of being a bot. This is interesting, but not totally unexpected.
+
+### Definitely Bots
+Now let's see how the model does with accounts we know to be bots. I just gathered some names from [this site](https://botwiki.org/tag/twitterbot/), which maintains a few lists of Twitter bots.
+
+```{r warning = FALSE, message = FALSE}
+# list bot accounts
+bots <- c('tiny_raindrops_', 'KAFFEE_REMINDER', 'MYPRESIDENTIS', 'COLORISEBOT', 'OSSPBOT',
+            'GITWISHES', 'SAYSTHEKREMLIN', 'NLPROVERBS', 'THEDOOMCLOCK', 'DAILYGLACIER')
+
+# get botornot estimates
+bot_data <- botornot(bots)
+
+# view prob ests
+bot_data %>% arrange(desc(prob_bot))
+```
+
+Surprise! They all have been assigned very high probabilities of being bots, because they are bots.
+
+### Conclusions
+I've had a fun time playing with this package -- thanks for following along. I could imagine something like this being used as a weighted input in a spam prediction model in the future, however the `botornot` model is imperfect in its current stage. We'll continue to have some fun with it and will have to consider making some tweaks before we put it into production.
+
+Thanks for reading! Let me know if you have any thoughts or questions in the comments below! 
