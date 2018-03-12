@@ -1,0 +1,194 @@
+---
+date: 2018-03-12T14:26:51-04:00
+type: "post"
+tags: []
+title: "Equal Pay Report 2018"
+subtitle: "What Men and Women Earn at Buffer"
+---
+
+Last April we released Buffer's first [equal pay report](https://open.buffer.com/equal-pay/) in celebration of Equal Pay Day. Since then, we have [overhauled our salary formula](https://open.buffer.com/salary-formula/) and made many internal role changes. Given all of these changes, I'm excited to dig into our salary data today and see how we're doing.
+
+```{r include = FALSE, message = FALSE, warning = FALSE}
+# load libraries
+library(dplyr)
+library(ggplot2)
+library(hrbrthemes)
+library(scales)
+```
+
+### Data Collection
+The data we'll use in this analysis comes from [this spreadsheet](https://docs.google.com/spreadsheets/d/1cRI2VUhFVWB-c8wTmTnbT2OMOdDNnbh06bjCID_IKt0/edit?usp=sharing). We'll simply read in a CSV downloaded from this sheet.
+
+```{r eval = FALSE}
+# read csv
+salaries <- read.csv("~/Downloads/salaries.csv", header = TRUE)
+```
+
+```{r include = FALSE}
+# save data
+# saveRDS(salaries, file = '2018-salaries.rds')
+
+# load data 
+salaries <- readRDS('2018-salaries.rds')
+
+# glimpse data
+glimpse(salaries)
+```
+
+Now we're ready for some exploratory analysis.
+
+### Global Summary Statistics
+Let's begin by describing the distribution of salaries for all team members of Buffer. It might be helpful to define a couple fields in our dataset. The `salary` field contains the totol pre-tax salaries of team members before tax in US dollars. This includes dependent grants and the choice to receive a higher salary instead of stock options. 
+
+The `base_salary` field contains the base salary as calculated by our new salary formula. This _excludes_ dependent grants and salary choices.
+
+In this analysis I chose to focus on the `salary` values, because that is what people take home (for the most part). 
+
+```{r}
+# summarise salary
+summary(salaries$salary)
+```
+
+The median salary at Buffer is \$109K and the average is \$114K. We can plot the distribution of salaries across Buffer.
+
+```{r}
+# define cuts
+cuts <- seq(60000, 280000, 20000)
+
+# define salary buckets
+salaries <- salaries %>% 
+  mutate(salary_bin = cut(salary, breaks = cuts, dig.lab = 10))
+
+# plot distribution of salaries
+salaries %>% 
+  count(salary_bin) %>% 
+  ggplot(aes(x = salary_bin, y = n)) +
+  geom_bar(stat = 'identity') +
+  theme_ipsum() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = NULL, y = "Team Members", title = "Salary Distribution")
+```
+
+The most common salary "bin" is 80-100K. Let's break salary down by gender now.
+
+### Average Salary by Gender
+We can quickly calculate the average and median salaries for both men and women at Buffer.
+
+```{r}
+# calculate average and median salaries
+salaries %>% 
+  group_by(gender) %>% 
+  summarise(average_salary = mean(salary), median_salary = median(salary))
+```
+
+The average salary for females at Buffer is **$106,808** and the median is **$94,546**. The average salary for men is **$117,530** and the median is **$114,215**. 
+
+If we look at averages, men earn around 10% more than women -- if we look at medians, men earn around 21% more than women! 
+
+```{r echo = FALSE}
+salaries %>%
+  group_by(gender) %>%
+  summarise(average_salary = mean(salary)) %>% 
+  ungroup() %>% 
+  mutate(gender = reorder(gender, average_salary)) %>% 
+  ggplot(aes(x = gender, y = average_salary)) +
+  geom_segment(aes(x = gender, xend = gender, y = 0, yend = average_salary)) +
+  geom_point(size = 10, color = "navy") +
+  geom_text(aes(label = comma(round(average_salary, 0))), hjust = 0.5, vjust = -2) +
+  theme_ipsum() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(labels = dollar_format(), limits = c(0, 130000)) +
+  labs(x = NULL, y = NULL, title = "Average Salary")
+```
+
+```{r echo = FALSE}
+salaries %>%
+  group_by(gender) %>%
+  summarise(median_salary = median(salary)) %>% 
+  ungroup() %>% 
+  mutate(gender = reorder(gender, median_salary)) %>% 
+  ggplot(aes(x = gender, y = median_salary)) +
+  geom_segment(aes(x = gender, xend = gender, y = 0, yend = median_salary)) +
+  geom_point(size = 10, color = "navy") +
+  geom_text(aes(label = comma(round(median_salary, 0))), hjust = 0.5, vjust = -2) +
+  theme_ipsum() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(labels = dollar_format(), limits = c(0, 130000)) +
+  labs(x = NULL, y = NULL, title = "Median Salary")
+```
+
+This discrpency can be surprising, especially for a company with a salary formula! Gender does not enter the salary formula in any way. However, there is something interesting going on - let's take a closer look at the data.
+
+### Technical and Non-Technical Roles
+I'm not the biggest fan of this terminology, but it can be useful to describe roles. Technical roles include engineering, data, design, product, and our full-stack marketer. Non-technical roles include marketing, leadership, and advocacy. 
+
+If we calculate the average salaries for technical and non-technical roles, we might see something interesting.
+
+```{r}
+# calculate average salaries for tech and non-tech roles
+salaries %>% 
+  group_by(role_type, gender) %>% 
+  summarise(average_salary = mean(salary))
+```
+
+This is interesting. If we segment team members by their role type, we can see that women earn around 1% more than men in non-technical roles, and men earn around only 12% more than women in technical roles. 
+
+This seems to explain the overall difference in average salaries. There are more men in technical roles, which tend to demand higher salaries. That, coupled with the fact that men earn more on-average than women in technical roles, leads to the 10% difference in the overall average salary.
+
+```{r echo = FALSE}
+salaries %>%
+  filter(role_type == "technical") %>% 
+  group_by(gender) %>%
+  summarise(average_salary = mean(salary)) %>% 
+  ungroup() %>% 
+  mutate(gender = reorder(gender, average_salary)) %>% 
+  ggplot(aes(x = gender, y = average_salary)) +
+  geom_segment(aes(x = gender, xend = gender, y = 0, yend = average_salary)) +
+  geom_point(size = 10, color = "navy") +
+  geom_text(aes(label = comma(round(average_salary, 0))), hjust = 0.5, vjust = -2) +
+  theme_ipsum() +
+  scale_y_continuous(labels = dollar_format(), limits = c(0, 150000)) +
+  labs(x = NULL, y = NULL, title = "Average Salary", subtitle = "For Technical Roles")
+```
+
+```{r echo = FALSE}
+salaries %>%
+  filter(role_type == "non-technical") %>% 
+  group_by(gender) %>%
+  summarise(average_salary = mean(salary)) %>% 
+  ungroup() %>% 
+  mutate(gender = reorder(gender, average_salary)) %>% 
+  ggplot(aes(x = gender, y = average_salary)) +
+  geom_segment(aes(x = gender, xend = gender, y = 0, yend = average_salary)) +
+  geom_point(size = 10, color = "navy") +
+  geom_text(aes(label = comma(round(average_salary, 0))), hjust = 0.5, vjust = -2) +
+  theme_ipsum() +
+  scale_y_continuous(labels = dollar_format(), limits = c(0, 120000)) +
+  labs(x = NULL, y = NULL, title = "Average Salary", subtitle = "For Non-Technical Roles")
+```
+
+### Salaries by Team
+We can also plot the average salary for each team at Buffer.
+
+```{r echo = FALSE}
+salaries %>%
+  group_by(team) %>%
+  summarise(average_salary = mean(salary)) %>% 
+  ungroup() %>% 
+  mutate(team = reorder(team, average_salary)) %>% 
+  ggplot(aes(x = team, y = average_salary)) +
+  geom_bar(stat = 'identity') + 
+  coord_flip() +
+  theme_ipsum() +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(x = NULL, y = NULL, title = "Average Salary By Team")
+```
+
+```{r}
+salaries %>%
+  group_by(team) %>%
+  summarise(average_salary = mean(salary)) %>% 
+  arrange(desc(average_salary))
+```
+
+Interesting stuff overall!
