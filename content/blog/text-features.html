@@ -1,0 +1,109 @@
+---
+date: 2018-03-08T09:44:37-05:00
+type: "post"
+tags: []
+title: "Analyzing Tweets with TextFeatures"
+---
+
+
+
+<p>I recently came across another useful package from Mike Kearney called <code>textfeatures</code>. It’s a simple package for extracting useful features from character objects, like the number of hashtags, mentions, urls, capital letters, exclamation points, etc.</p>
+<p>In this analysis we’ll analyze tweets from Buffer for Business users, and see which features correlate most closely to engagement. First let’s load the libraries we’ll need.</p>
+<pre class="r"><code># load libraries
+library(buffer)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(hrbrthemes)
+library(ggridges)
+library(textfeatures)
+library(corrplot)</code></pre>
+<p>We now need to gather tweets sent from Buffer for Business users in the past few weeks. We’ll use the following query to do that.</p>
+<pre class="sql"><code>with business_users as (
+  select
+    user_id
+  from dbt.users
+  where simplified_billing_plan = &#39;business&#39; 
+)
+select 
+  up.id
+  , up.user_id
+  , up.via
+  , up.client_type
+  , up.text
+  , up.has_photo
+  , up.has_multiple_photos
+  , up.number_of_likes
+  , up.number_of_favorites
+  , up.number_of_times_mentioned
+  , up.number_of_retweets
+  , up.number_of_clicks
+  , up.number_of_comments
+  , up.number_of_total_interactions
+from dbt.updates as up
+inner join business_users as u
+on up.user_id = u.user_id
+where was_sent_with_buffer
+and profile_service = &#39;twitter&#39;
+and up.created_at &gt;= (current_date - 7)
+and up.text is not null 
+and up.text != &#39;&#39;
+and has_failed = false</code></pre>
+<pre class="r"><code># replace NAs with 0
+tweets &lt;- tweets %&gt;% 
+  replace_na(list(number_of_favorites = 0, 
+                  number_of_retweets = 0,
+                  number_of_times_mentioned = 0,
+                  number_of_total_interactions = 0))</code></pre>
+<p>Now we can extract features from the text.</p>
+<pre class="r"><code># extract text features
+tweets &lt;- tweets %&gt;% 
+  bind_cols(textfeatures(tweets$text))</code></pre>
+<p>Cool! Now let’s create a correlation matrix with these features and the <code>number_of_total_interactions</code> field.</p>
+<pre class="r"><code># extract features
+features &lt;- tweets %&gt;% 
+  select(interactions:n_charsperword) 
+
+# build correlation plot
+corrplot(cor(features), method = &quot;color&quot;, type = &quot;upper&quot;, tl.col = &quot;black&quot;, tl.srt = 45)</code></pre>
+<p><img src="/blog/text-features_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>There doesn’t appear to be a strong correlation between <code>interactions</code> and any single feature. Just for fun, let’s plot the density function of <code>interactions</code>.</p>
+<p><img src="/blog/text-features_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>Looks to be power-law distributed. What if created the same correlation plot for a single user’s tweets?</p>
+<pre class="r"><code># gather tweets of a single user
+user_tweets &lt;- tweets %&gt;% 
+  filter(user_id == &#39;56a511bd20e312680618e45d&#39;) %&gt;% 
+  select(interactions:n_charsperword)
+  
+# build correlation plot for single user
+corrplot(cor(user_tweets), method = &quot;color&quot;, type = &quot;upper&quot;, tl.col = &quot;black&quot;, tl.srt = 45)</code></pre>
+<p><img src="/blog/text-features_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>We can detect some stronger correlations here. Let’s plot the number of exclamation points against the number of interactions for this user’s tweets.</p>
+<p><img src="/blog/text-features_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>Not surprisingly, the distribution of interactions is quite wide. We could make some sort of log transformation to help this, but what if we plotted the median number of interactions for each number of exclamation points?</p>
+<pre class="r"><code>user_tweets %&gt;% 
+  mutate(n_exclaims = as.factor(n_exclaims)) %&gt;% 
+  group_by(n_exclaims) %&gt;% 
+  summarise(tweets = n(), med_interactions = median(interactions)) %&gt;% 
+  ggplot(aes(x = n_exclaims, y = med_interactions)) +
+  geom_bar(stat = &#39;identity&#39;) + 
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = &quot;Median Number of Interactions&quot;, y = &quot;Number of Exclamation Points&quot;,
+       title = &quot;Median Number of Interactions&quot;,
+       subtitle = &quot;By Number of Exclamation Points&quot;)</code></pre>
+<p><img src="/blog/text-features_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+<p>This is quite interesting to see. There appears to be a significant increase in the number of interactions that this user’s tweets get when there are more exclamation points. Let’s recreate this plot, but use the number of hashtags instead of the number of exclamation points.</p>
+<pre class="r"><code>user_tweets %&gt;% 
+  mutate(n_hashtags = as.factor(n_hashtags)) %&gt;% 
+  group_by(n_hashtags) %&gt;% 
+  summarise(tweets = n(), med_interactions = median(interactions)) %&gt;% 
+  ggplot(aes(x = n_hashtags, y = med_interactions)) +
+  geom_bar(stat = &#39;identity&#39;) + 
+  coord_flip() +
+  theme_ipsum() +
+  labs(x = &quot;Median Number of Interactions&quot;, y = &quot;Number of Hashtags&quot;,
+       title = &quot;Median Number of Interactions&quot;,
+       subtitle = &quot;By Number of Hashtags&quot;)</code></pre>
+<p><img src="/blog/text-features_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>Cool! We’ll come back to this in the future…</p>
