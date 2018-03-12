@@ -1,6 +1,5 @@
 ---
 date: 2018-03-12T14:26:51-04:00
-type: "post"
 tags: []
 title: "Equal Pay Report 2018"
 subtitle: "What Men and Women Earn at Buffer"
