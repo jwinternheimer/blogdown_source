@@ -11,7 +11,7 @@ This question came to me last week from one of our product managers. Let's set a
 ![](http://hi.buffer.com/1S0V0W2H3b1a/Screen%20Shot%202018-02-02%20at%2012.18.18%20PM.png)
 
 ### Findings
-The vast majority of Tailored Posts sessions that include at least one Twitter profile selected only have a single Twitter profile selected. Only around 8% of sessions in the past month have had more than one Twitter profile selected. This still equates to millions of sessions -- my back of the napkin estimate is around 8-10 million sessions with multiple Twitter profiles selected. 
+The vast majority of Tailored Posts sessions that include at least one Twitter profile selected only have a single Twitter profile selected. Only around 8% of sessions in the past month have had more than one Twitter profile selected. This still equates to millions of sessions -- my back of the napkin estimate is around one million sessions with multiple Twitter profiles selected. 
 
 This makes sense to me, since most sessions come from users on the free plan. These users are less likely, or even unable, to have multiple Twitter profiles selected. 
 
@@ -43,8 +43,10 @@ select
   , up.profile_id
   , up.profile_service
   , up.user_id
+  , u.billing_plan
 from dbt.multiple_composer_updates as m
 inner join dbt.updates as up on m.update_id = up.id
+inner join dbt.users as u on up.user_id = u.user_id
 where m.composer_type in ('multiple_extension', 'multiple_web_dashboard')
 and m.composer_session_created_at >= (current_date - 30)
 and up.profile_service = 'twitter'
@@ -65,12 +67,12 @@ Great, we have two million Twitter updates to work with. At this point we can st
 ```{r warning = FALSE, message = FALSE}
 # group by composer session
 by_session <- posts %>% 
-  group_by(user_id, composer_session_id) %>% 
+  group_by(user_id, billing_plan, composer_session_id) %>% 
   summarise(profiles = n_distinct(profile_id))
 
 # group by user
 by_user <- by_session %>% 
-  group_by(user_id) %>% 
+  group_by(user_id, billing_plan) %>% 
   summarise(avg_profiles = mean(profiles))
 ```
 
@@ -128,4 +130,29 @@ ggplot(by_user, aes(x = avg_profiles)) +
   labs(x = "Twitter Profiles", y = "Percent of Users", 
        title = "Average Number of Twitter Profiles Selected",
        subtitle = "Per User, Tailored Posts Sessions")
+```
+
+### Removing Free Plan Users
+What would the distribution look like for users on paid plans? Similar story here.
+
+```{r echo = FALSE, warning = FALSE}
+ggplot(filter(by_session, billing_plan != 'individual'), aes(x = profiles)) +
+  geom_histogram(binwidth = 1, color = 'white') +
+  scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, 2)) +
+  scale_y_continuous(labels = comma) +
+  theme_ipsum() +
+  labs(x = "Twitter Profiles", y = "Sessions", title = "Distribution of Twitter Profiles Selected",
+       subtitle = "In Tailored Posts Sessions, Paying Customers")
+```
+
+```{r echo = FALSE, warning = FALSE}
+ggplot(filter(by_session, billing_plan != 'individual'), aes(x = profiles)) +
+  stat_ecdf() +
+  coord_cartesian(xlim = c(0, 25)) +
+  scale_x_continuous(breaks = seq(0, 25, 5)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2), labels = percent) +
+  theme_ipsum() +
+  labs(x = "Twitter Profiles", y = "Percent of Sessions", 
+       title = "Distribution of Twitter Profiles Selected",
+       subtitle = "In Tailored Posts Sessions, Paying Customers")
 ```
