@@ -1,0 +1,131 @@
+---
+date: 2018-03-13T08:48:47-04:00
+subtitle: ""
+type: "post"
+tags: []
+title: "How Many Twitter Accounts Are Selected in Tailored Posts Sessions?"
+---
+
+This question came to me last week from one of our product managers. Let's set about answering it! To do so, we'll gather updates sent in the past months from Tailored Posts sessions, calculate the average number of Twitter profiles selected for each user, then average that average. As of today, Tailored Posts has been rolled out to around 50% of Buffer users.
+
+![](http://hi.buffer.com/1S0V0W2H3b1a/Screen%20Shot%202018-02-02%20at%2012.18.18%20PM.png)
+
+### Findings
+The vast majority of Tailored Posts sessions that include at least one Twitter profile selected only have a single Twitter profile selected. Only around 8% of sessions in the past month have had more than one Twitter profile selected. This still equates to millions of sessions -- my back of the napkin estimate is around 8-10 million sessions with multiple Twitter profiles selected. 
+
+This makes sense to me, since most sessions come from users on the free plan. These users are less likely, or even unable, to have multiple Twitter profiles selected. 
+
+### Data collection
+We'll need to load the libraries we use later on.
+
+```{r warning = FALSE, message = FALSE}
+# load libraries
+library(buffer)
+library(dplyr)
+library(ggplot2)
+library(hrbrthemes)
+library(scales)
+```
+
+Now let's collecte the updates.
+
+```{r include = FALSE}
+# connect to redshift
+con <- redshift_connect()
+```
+
+```{sql eval = FALSE}
+select 
+  m.update_id
+  , m.composer_type
+  , m.composer_session_created_at
+  , m.composer_session_id
+  , up.profile_id
+  , up.profile_service
+  , up.user_id
+from dbt.multiple_composer_updates as m
+inner join dbt.updates as up on m.update_id = up.id
+where m.composer_type in ('multiple_extension', 'multiple_web_dashboard')
+and m.composer_session_created_at >= (current_date - 30)
+and up.profile_service = 'twitter'
+order by random()
+limit 2000000
+```
+
+```{r include = FALSE}
+# save data
+# saveRDS(posts, file = 'mc-twitter-posts.rds')
+
+# load data
+posts <- readRDS('mc-twitter-posts.rds')
+```
+
+Great, we have two million Twitter updates to work with. At this point we can start grouping by the `user_id` and `composer_session_id` fields to find the number of Twitter profiles selected in each session.
+
+```{r warning = FALSE, message = FALSE}
+# group by composer session
+by_session <- posts %>% 
+  group_by(user_id, composer_session_id) %>% 
+  summarise(profiles = n_distinct(profile_id))
+
+# group by user
+by_user <- by_session %>% 
+  group_by(user_id) %>% 
+  summarise(avg_profiles = mean(profiles))
+```
+
+### Exploratory Analysis
+Now we can plot the overall distribution of the number of Twitter profiles selected. We can see in the graphs below that the vast majority of tailored posts sessions have only one Twitter profile selected.
+
+```{r echo = FALSE, warning = FALSE}
+ggplot(by_session, aes(x = profiles)) +
+  geom_histogram(binwidth = 1, color = 'white') +
+  scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, 2)) +
+  scale_y_continuous(labels = comma) +
+  theme_ipsum() +
+  labs(x = "Twitter Profiles", y = "Sessions", title = "Distribution of Twitter Profiles Selected",
+       subtitle = "In Tailored Posts Sessions")
+```
+
+We can also plot the cumulative distribution function (CDF). We can see that over 90% of sessions in which at least one Twitter profile was selected, only a single Twitter profile was selected. Around 96% of sessions have two or less Twitter profiles selected, and around 98% of sessions had five or less Twitter profiles selected.
+
+```{r echo = FALSE, warning = FALSE}
+ggplot(by_session, aes(x = profiles)) +
+  stat_ecdf() +
+  coord_cartesian(xlim = c(0, 25)) +
+  scale_x_continuous(breaks = seq(0, 25, 5)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2), labels = percent) +
+  theme_ipsum() +
+  labs(x = "Twitter Profiles", y = "Percent of Sessions", 
+       title = "Distribution of Twitter Profiles Selected",
+       subtitle = "In Tailored Posts Sessions")
+```
+
+Let's try a slightly different approach. Instead of plotting the distribution of the number of Twitter profiles selected for all composer sessions, we can look at the distribution of the _average_ number of Twitter profiles selected _per user_. This way, users that have posted very frequently will have less of an influence on the distribution.
+
+### Average Number of Twitter Profiles Selected Per User
+We'll use the same techniques, but use the `by_user` dataframe we created earlier. We can see that the distribution is even more heavily skewed to the left!
+
+```{r echo = FALSE, warning = FALSE}
+ggplot(by_user, aes(x = avg_profiles)) +
+  geom_histogram(binwidth = 1, color = 'white') +
+  scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, 2)) +
+  scale_y_continuous(labels = comma) +
+  theme_ipsum() +
+  labs(x = "Twitter Profiles", y = "Sessions", title = "Average Number of Twitter Profiles Selected",
+       subtitle = "Per User, Tailored Posts Sessions")
+```
+
+The CDF below is pretty interesting, around 99% of users have had two or less Twitter profiles selected (on average) in thier Tailored Posts sessions.
+
+```{r echo = FALSE, warning = FALSE}
+ggplot(by_user, aes(x = avg_profiles)) +
+  stat_ecdf() +
+  coord_cartesian(xlim = c(0, 25)) +
+  scale_x_continuous(breaks = seq(0, 20, 4)) +
+  scale_y_continuous(breaks = seq(0, 1, 0.2), labels = percent) +
+  theme_ipsum() +
+  labs(x = "Twitter Profiles", y = "Percent of Users", 
+       title = "Average Number of Twitter Profiles Selected",
+       subtitle = "Per User, Tailored Posts Sessions")
+```

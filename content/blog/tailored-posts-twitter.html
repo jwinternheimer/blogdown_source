@@ -1,0 +1,71 @@
+---
+date: 2018-03-13T08:48:47-04:00
+subtitle: ""
+type: "post"
+tags: []
+title: "How Many Twitter Accounts Are Selected in Tailored Posts Sessions?"
+---
+
+
+
+<p>This question came to me last week from one of our product managers. Let’s set about answering it! To do so, we’ll gather updates sent in the past months from Tailored Posts sessions, calculate the average number of Twitter profiles selected for each user, then average that average. As of today, Tailored Posts has been rolled out to around 50% of Buffer users.</p>
+<div class="figure">
+<img src="http://hi.buffer.com/1S0V0W2H3b1a/Screen%20Shot%202018-02-02%20at%2012.18.18%20PM.png" />
+
+</div>
+<div id="findings" class="section level3">
+<h3>Findings</h3>
+<p>The vast majority of Tailored Posts sessions that include at least one Twitter profile selected only have a single Twitter profile selected. Only around 8% of sessions in the past month have had more than one Twitter profile selected. This still equates to millions of sessions – my back of the napkin estimate is around 8-10 million sessions with multiple Twitter profiles selected.</p>
+<p>This makes sense to me, since most sessions come from users on the free plan. These users are less likely, or even unable, to have multiple Twitter profiles selected.</p>
+</div>
+<div id="data-collection" class="section level3">
+<h3>Data collection</h3>
+<p>We’ll need to load the libraries we use later on.</p>
+<pre class="r"><code># load libraries
+library(buffer)
+library(dplyr)
+library(ggplot2)
+library(hrbrthemes)
+library(scales)</code></pre>
+<p>Now let’s collecte the updates.</p>
+<pre class="sql"><code>select 
+  m.update_id
+  , m.composer_type
+  , m.composer_session_created_at
+  , m.composer_session_id
+  , up.profile_id
+  , up.profile_service
+  , up.user_id
+from dbt.multiple_composer_updates as m
+inner join dbt.updates as up on m.update_id = up.id
+where m.composer_type in (&#39;multiple_extension&#39;, &#39;multiple_web_dashboard&#39;)
+and m.composer_session_created_at &gt;= (current_date - 30)
+and up.profile_service = &#39;twitter&#39;
+order by random()
+limit 2000000</code></pre>
+<p>Great, we have two million Twitter updates to work with. At this point we can start grouping by the <code>user_id</code> and <code>composer_session_id</code> fields to find the number of Twitter profiles selected in each session.</p>
+<pre class="r"><code># group by composer session
+by_session &lt;- posts %&gt;% 
+  group_by(user_id, composer_session_id) %&gt;% 
+  summarise(profiles = n_distinct(profile_id))
+
+# group by user
+by_user &lt;- by_session %&gt;% 
+  group_by(user_id) %&gt;% 
+  summarise(avg_profiles = mean(profiles))</code></pre>
+</div>
+<div id="exploratory-analysis" class="section level3">
+<h3>Exploratory Analysis</h3>
+<p>Now we can plot the overall distribution of the number of Twitter profiles selected. We can see in the graphs below that the vast majority of tailored posts sessions have only one Twitter profile selected.</p>
+<p><img src="/blog/tailored-posts-twitter_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>We can also plot the cumulative distribution function (CDF). We can see that over 90% of sessions in which at least one Twitter profile was selected, only a single Twitter profile was selected. Around 96% of sessions have two or less Twitter profiles selected, and around 98% of sessions had five or less Twitter profiles selected.</p>
+<p><img src="/blog/tailored-posts-twitter_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>Let’s try a slightly different approach. Instead of plotting the distribution of the number of Twitter profiles selected for all composer sessions, we can look at the distribution of the <em>average</em> number of Twitter profiles selected <em>per user</em>. This way, users that have posted very frequently will have less of an influence on the distribution.</p>
+</div>
+<div id="average-number-of-twitter-profiles-selected-per-user" class="section level3">
+<h3>Average Number of Twitter Profiles Selected Per User</h3>
+<p>We’ll use the same techniques, but use the <code>by_user</code> dataframe we created earlier. We can see that the distribution is even more heavily skewed to the left!</p>
+<p><img src="/blog/tailored-posts-twitter_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>The CDF below is pretty interesting, around 99% of users have had two or less Twitter profiles selected (on average) in thier Tailored Posts sessions.</p>
+<p><img src="/blog/tailored-posts-twitter_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+</div>
