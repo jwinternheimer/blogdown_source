@@ -1,0 +1,69 @@
+---
+date: 2018-03-14T09:44:03-04:00
+type: "post"
+tags: []
+title: "How Buffer Uses Slack"
+---
+
+
+
+<p>Buffer started using Slack (again) on Thursday, June 2, 2016. Slack makes available some <a href="https://buffer.slack.com/stats">great data</a> to all members of the team, so I thought it would be fun to analyze some of Buffer’s usage in the past couple of years.</p>
+<p>Transparency is one of our core values, so it is always good to check in and see how we’re doing on that front. In this analysis, we will look at message frequency over time, the percentage of messages sent in private and public channels, and the percentage of messages sent in DMs.</p>
+<p>To collect the data, we simply export a CSV from <a href="https://buffer.slack.com/stats">this site</a> and read it into our R session. The data includes daily statistics for our Slack usage, including the number of active users, number of messages sent in public, private, and shared channels, the number of messages shared in DMs, and many other interesting metrics.</p>
+<pre class="r"><code># read csv
+slack &lt;- read.csv(&#39;~/Downloads/slack.csv&#39;, header = TRUE)</code></pre>
+<p>We can do a bit of cleaning, especially with the column names.</p>
+<pre class="r"><code># change column names
+colnames(slack) &lt;- safe_names(colnames(slack))
+
+# replace x_of_
+colnames(slack) &lt;- gsub(&quot;x_of_&quot;, &quot;&quot;, colnames(slack))
+
+# set date as date object
+slack$date &lt;- as.Date(slack$date, format = &quot;%Y-%m-%d&quot;)
+
+# filter out dates before June 2, 2016
+slack &lt;- filter(slack, date &gt;= &quot;2016-06-02&quot;)</code></pre>
+<p>We also need to derive the week from the date, as we will look only at weekly usage.</p>
+<pre class="r"><code># derive week
+slack$week &lt;- floor_date(slack$date, unit = &quot;week&quot;)
+
+# group usage by week
+weekly_usage &lt;- slack %&gt;% 
+  filter(week != min(week) &amp; week != max(week)) %&gt;% 
+  group_by(week) %&gt;% 
+  summarise(active_users = max(weekly_active_users),
+            users_posting_messages = max(weekly_users_posting_messages),
+            messages_in_public_channels = sum(messages_in_public_channels),
+            messages_in_private_channels = sum(messages_in_private_channels),
+            messages_in_shared_channels = sum(messages_in_shared_channels),
+            messages_in_dms = sum(messages_in_dms),
+            public_channels = max(public_workspace_channels),
+            messages_from_apps = sum(messages_from_apps)) %&gt;% 
+  mutate(total_messages = messages_in_public_channels + 
+           messages_in_private_channels +
+           messages_in_shared_channels +
+           messages_in_dms)</code></pre>
+<p>Now we’re ready for some exploratory analysis.</p>
+<div id="number-of-messages-over-time" class="section level3">
+<h3>Number of Messages over Time</h3>
+<p>Let’s begin by plotting the total number of messages over time. In the graph below we can see that the total number of messages sent, excluding messages from bots and apps, has decreased significantly since mid-2016, from around 25 thousand per week to around 15 thousand per week.</p>
+<p>This makes sense. As a fully remote and distributed company, we made a concerted effort to communicate more asynchronously - it’s cool to see this show up in the data, although it makes for a more lonely Slack.</p>
+<p>We can also see the low point that occurred when Buffer closed down for the week over the holidays. :)</p>
+<p><img src="/blog/slack-usage_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>We can also control for team size by looking at the weekly number of messages sent <em>per active user</em>. We see a similar trend. There is a substantial decrease in the number of messages sent per active user.</p>
+<p><img src="/blog/slack-usage_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+</div>
+<div id="public-vs-private-vs-dm" class="section level3">
+<h3>Public vs Private vs DM</h3>
+<p>We should also examine the total number of messages sent in public channels, private channels, and DMs. Somewhat surprisingly, most messages are sent in DMs. The gap between the number of messages sent in DMs and the number of messages sent in public channels seems to have decreased somewhat since 2016, however it is still substantial.</p>
+<p><img src="/blog/slack-usage_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>Let’s look at the percentage of messages that are posted in public, private, and DM channels. To do this, we need to tidy the data a little bit with <code>tidyr</code>’s <code>gather</code> function.</p>
+<pre class="r"><code># tidy data
+weekly_usage &lt;- weekly_usage %&gt;% 
+  gather(channel_type, messages, messages_in_public_channels:messages_in_dms)</code></pre>
+<p>Nice! Now, let’s make a big assumption and label all messages sent in public channels “transparent” and call those in DMs and private channels not transparent. We can then plot the percentage of messages that are “transparent” over time. I acknowledge that this is probably a gross over-simplification.</p>
+<p>In recent weeks, we can see an increase in the percentage of messages being shared in public channels. There are a lot of key projects happening right now, including Instagram direct posting, Twitter automation policy changes, and pricing changes. These have resulted in more new public channels and more messages being sent in public channels.</p>
+<p><img src="/blog/slack-usage_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>We can see that there is quite a large gap. For the most part, with exceptions, less than 40% of all messages are shared “transparently”. On average, around 65% of all Slack messages have been sent in private channels and DMs. Just to reiterate, I know that many DMs wouldn’t be beneficial for the team to see publicly and would only add clutter and noise. Even so, 65% feels high.</p>
+</div>

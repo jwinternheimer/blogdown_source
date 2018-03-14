@@ -48,10 +48,8 @@ from dbt.multiple_composer_updates as m
 inner join dbt.updates as up on m.update_id = up.id
 inner join dbt.users as u on up.user_id = u.user_id
 where m.composer_type in ('multiple_extension', 'multiple_web_dashboard')
-and m.composer_session_created_at >= (current_date - 30)
+and m.composer_session_created_at >= (current_date - 8)
 and up.profile_service = 'twitter'
-order by random()
-limit 2000000
 ```
 
 ```{r include = FALSE}
@@ -103,7 +101,67 @@ ggplot(by_session, aes(x = profiles)) +
        subtitle = "In Tailored Posts Sessions")
 ```
 
+We can also count the absolute number of sessions in which at least two Twitter profiles were selected.
+
+```{r}
+# count sessions with at least two twitter profiles
+table(by_session$profiles >= 2)
+```
+
+Let's also look at the absolute number of sessions in which at least five Twitter profiles were selected.
+
+```{r}
+# count sessions with at least five twitter profiles
+table(by_session$profiles >= 5)
+```
+
+We can break this down by plan.
+
+```{r}
+# determine if five profiles are selected
+by_session <- by_session %>% 
+  mutate(has_two_profiles = profiles > 1,
+         has_five_profiles = profiles >= 5)
+
+# break down by plan
+by_session %>% 
+  group_by(billing_plan, has_five_profiles) %>% 
+  summarise(users = n_distinct(user_id), 
+            sessions = n_distinct(composer_session_id)) %>% 
+  filter(has_five_profiles)
+```
+
+Let's count the number of users that had at least one session in which multpiple Twitter profiles were selected.
+
+```{r}
+by_session %>% 
+  group_by(has_two_profiles) %>% 
+  summarise(users = n_distinct(user_id), 
+            sessions = n_distinct(composer_session_id)) %>%  
+  filter(has_two_profiles)
+```
+
 Let's try a slightly different approach. Instead of plotting the distribution of the number of Twitter profiles selected for all composer sessions, we can look at the distribution of the _average_ number of Twitter profiles selected _per user_. This way, users that have posted very frequently will have less of an influence on the distribution.
+
+Let's see how many users had two or more Twitter profiles selected on average in the past week.
+
+```{r}
+# how many users had two or more Twitter profiles selected on average
+table(by_user$avg_profiles > 2)
+```
+
+```{r}
+# determine if two profiles are selected
+by_user <- by_user %>% 
+  mutate(has_two_profiles = avg_profiles >= 2,
+         has_three_profiles = avg_profiles >= 3)
+
+# break down by plan
+by_user %>% 
+  group_by(billing_plan, has_three_profiles) %>% 
+  summarise(users = n_distinct(user_id)) %>% 
+  filter(has_three_profiles)
+```
 
 ### Average Number of Twitter Profiles Selected Per User
 We'll use the same techniques, but use the `by_user` dataframe we created earlier. We can see that the distribution is even more heavily skewed to the left!
