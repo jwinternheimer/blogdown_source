@@ -1,0 +1,354 @@
+---
+date: 2018-03-14T14:43:59-04:00
+type: "post"
+tags: []
+title: "Defining an Activation Rate"
+subtitle: "What Makes New Users Successful?"
+---
+
+A couple years ago we discovered that new users were much more likely to be successful with Buffer if they scheduled at least three updates in their first seven days after signing up. We defined success as still being an active user three months after signing up. 
+
+In this analysis we'll revisit the assumptions we made and determine if this "three updates in seven days" activation metric is still appropriate for today. To do that, we'll examine usage in the first week after signing up for Buffer. We'll look at the number of posts scheduled, the number of profiles added, and the number of days that users were active. We will again define success as being retained for three months.
+
+Based on some basic exploratory analysis below, I might suggest an activation metric of **at least 3 updates created and 2 days active within the first week**. Using this definition, approximately 17% of new users end up activating.
+
+Around 26% of users that did not activate were retained for three months, whereas 42% of users that activated were retained. Activated users are more than 60% more likely to be retained for three months by this definition. 
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+# load libraries
+library(buffer)
+library(dplyr)
+library(ggplot2)
+library(hrbrthemes)
+library(scales)
+```
+
+### Data Collection
+We'll want to gather all users that signed up before three months ago. We don't yet know if users that signed up in the past three months were "successful" or not. We also want to know how many profiles they added in the first week and how many updates were created. We want users that signed up between December 1, 2016 and December 1, 2017.
+
+We'll gather that data with the following query.
+
+```{r include = FALSE}
+# connect to redshift
+con <- redshift_connect()
+```
+
+```{sql eval = FALSE}
+with profiles as (
+  select 
+    u.user_id
+    , count(distinct p.id) as profiles
+  from dbt.users as u
+  left join dbt.profiles as p
+  on u.user_id = p.user_id and datediff(day, u.created_at, p.created_at) < 7
+  where u.created_at >= '2016-12-01' and u.created_at <= '2017-12-01'
+  group by 1
+),
+
+last_active_date as (
+  select 
+    user_id
+    , max(date(created_at)) as last_active_date
+  from dbt.updates
+  where was_sent_with_buffer
+  and status != 'failed'
+  and created_at > '2016-12-01'
+  group by 1
+)
+
+select 
+  u.user_id
+  , date(u.created_at) as signup_date
+  , p.profiles
+  , l.last_active_date
+  , count(distinct up.id) as updates
+  , count(distinct date(up.created_at)) as days_active
+from dbt.users as u
+left join dbt.updates as up
+  on (u.user_id = up.user_id and datediff(day, u.created_at, up.created_at) < 7)
+left join profiles as p 
+  on u.user_id = p.user_id
+left join last_active_date as l
+  on u.user_id = l.user_id
+where u.created_at >= '2016-12-01' and u.created_at <= '2017-12-01'
+  and (up.was_sent_with_buffer = TRUE or up.was_sent_with_buffer is null)
+  and (up.status != 'failed' or up.status is null)
+  group by 1, 2, 3, 4
+```
+
+```{r include = FALSE}
+# save data
+# saveRDS(users, file = 'free-user-activation.rds')
+
+# load data 
+users <- readRDS('free-user-activation.rds')
+```
+
+Great, we now have around 1.4 million Buffer users to analyze! 
+
+### Data Tidying
+We also want to know if the user was successful. We do this by determining if the user was still active 90 days after signing up. If the user didn't send any updates, we'll set their `last_active_date` to the `signup_date` value.
+
+```{r warning = FALSE, message = FALSE}
+# set last active date
+users$last_active_date[is.na(users$last_active_date)] <- users$signup_date
+
+# determine if user was successful
+users <- users %>% 
+  mutate(successful = as.numeric(last_active_date - signup_date) >= 90)
+```
+
+Let's see what proportion of signups were retained for three months.
+
+```{r}
+# get success rate
+users %>% 
+  group_by(successful) %>% 
+  summarise(users = n_distinct(user_id)) %>% 
+  mutate(percent = users / sum(users))
+```
+
+Around 29% of users were retained for three months.
+
+### Searching for Activation
+Now let's see how well these metrics correlate with success. To do so, we'll use a logistic regression model.
+
+```{r warning = FALSE, message = FALSE}
+# define logistic regression model
+mod <- glm(successful ~ profiles + updates + days_active, data = users, family = "binomial")
+
+# summarize the model
+summary(mod)
+```
+
+All three metrics seem to have very significant effects on the probability of a user being successful. Interesting, the correlation between updates and success is negative! I have a hunch that this is because of outliers, folks that send thousands of updates in their first days. Let's remove them from the dataset.
+
+```{r}
+# find quantiles for updates
+quantile(users$updates, probs = c(0, 0.5, 0.99, 0.995))
+```
+
+The 99th percentile for updates created in the first week is 75, so let's remove users that created 100 or more updates in their first week.
+
+```{r}
+# remove outliers
+users <- filter(users, updates < 100)
+```
+
+Now let's rebuild the model.
+
+```{r warning = FALSE, message = FALSE}
+# define logistic regression model
+mod <- glm(successful ~ profiles + updates + days_active, data = users, family = "binomial")
+
+# summarize the model
+summary(mod)
+```
+
+That's much more like it. :) 
+
+### Updates
+In the first activation metric, we decided that three updates in seven days was optimal. We can examine the success rate for users that sent a certain number of updates in their first week to help with this.
+
+```{r}
+# define bins
+cuts <- c(1, 5, 10, 20, 50, 100)
+
+# create update bins
+users <- users %>% 
+  mutate(update_bin = cut(updates, breaks = cuts, include.lowest = TRUE))
+
+# plot success rate for each bin
+users %>% 
+  group_by(update_bin, successful) %>% 
+  summarise(users = n_distinct(user_id)) %>% 
+  mutate(percent = users / sum(users)) %>% 
+  filter(successful & !is.na(update_bin)) %>% 
+  ggplot(aes(x = update_bin, y = percent)) +
+  geom_bar(stat = 'identity') +
+  theme_ipsum() +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Updates Created in First Week", y = NULL,
+       title = "Success Rate by Update Bin", 
+       subtitle = "Success: Retained for 90 Days")
+```
+
+We can see that the success rate increases as the update bins increase. Over 50% of users that create 50 or more updates in their first week are retained for three months. The problem is that there are very few users that do this. We see that there is a big jump from 1 to 20 updates. Let's zoom in there and see if there is a point with the greatest marginal return.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+# define temp table
+temp <- data.frame(updates = numeric(0), n_users = numeric(0), success_rate = numeric(0))
+
+# get success rates for each number of updates
+for (i in 1:99) {
+  
+  # set update number
+  updates <- i
+  
+  # get number of users with at least that number
+  n_users <- nrow(filter(users, updates >= i))
+  
+  # get success_rate
+  success <- users %>% 
+    filter(updates >= i) %>% 
+    group_by(successful) %>% 
+    summarise(users = n_distinct(user_id)) %>% 
+    mutate(percent = users / sum(users)) %>% 
+    filter(successful)
+  
+  success_rate = success[1, ]$percent
+  
+  row <- cbind(updates, n_users, success_rate)
+  
+  temp <- rbind(temp, row)
+}
+
+# plot success rates
+ggplot(temp, aes(x = updates, y = success_rate)) +
+  geom_line() +
+  theme_ipsum() +
+  scale_y_continuous(limits = c(0.25, 0.55), labels = percent) +
+  scale_x_continuous(limits = c(0, 50), breaks = seq(0, 50, 10)) +
+  labs(x = "N or More Updates Sent in First Week", y = NULL, title = "Success Rate",
+       subtitle = "For Users With At Least X Updates")
+```
+
+The graph below shows the proportion of users with at least X updates that were reteined for three months. We can see that there are diminishing returns, but it is tough to tell where an inflection point might be. One feature that is cool to see is the little bump at 11 updates. This exists because of the _queue limit_. Whene a user signs up for Buffer on a free plan, they can only have 10 updates scheduled at one time for a single profile. 
+
+What would this grpah look like if we zoomed into only look at 1-15 updates?
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+# plot success rates
+ggplot(temp, aes(x = updates, y = success_rate)) +
+  geom_line() +
+  geom_point() +
+  theme_ipsum() +
+  scale_y_continuous(limits = c(0.25, 0.50), labels = percent) +
+  scale_x_continuous(limits = c(0, 15)) +
+  labs(x = "N or More Updates Sent in First Week", y = NULL, title = "Success Rate",
+       subtitle = "For Users With At Least X Updates")
+```
+
+To my eyes, **three** updates seems as good a choice as we can get. There are clear diminishing returns after three updates, and a significant number of users (358 thousand) did successfully take the action.
+
+### Profiles
+We'll take the same approach to look at profiles.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+# define bins
+cuts <- c(-Inf, 0, 1, 2, 5, 10, 25, 50, Inf)
+
+# create update bins
+users <- users %>% 
+  mutate(profile_bin = cut(profiles, breaks = cuts))
+
+# plot success rate for each bin
+users %>% 
+  group_by(profile_bin, successful) %>% 
+  summarise(users = n_distinct(user_id)) %>% 
+  mutate(percent = users / sum(users)) %>% 
+  filter(successful & !is.na(profile_bin)) %>% 
+  ggplot(aes(x = profile_bin, y = percent)) +
+  geom_bar(stat = 'identity') +
+  theme_ipsum() +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Profiles Added in First Week", y = NULL,
+       title = "Success Rate by Profile Bin", 
+       subtitle = "Success: Retained for 90 Days")
+```
+
+We can see that adding a single profile doesn't quite lead to success. The biggest jump in the success rate comes between two and ten profiles.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+# define temp table
+temp <- data.frame(profiles = numeric(0), n_users = numeric(0), success_rate = numeric(0))
+
+# get success rates for each number of profiles
+for (i in 0:10) {
+  
+  # set profile number
+  profiles <- i
+  
+  # get number of users with at least that number
+  n_users <- nrow(filter(users, profiles >= i))
+  
+  # get success_rate
+  success <- users %>% 
+    filter(profiles >= i) %>% 
+    group_by(successful) %>% 
+    summarise(users = n_distinct(user_id)) %>% 
+    mutate(percent = users / sum(users)) %>% 
+    filter(successful)
+  
+  success_rate = success[1, ]$percent
+  
+  row <- cbind(profiles, n_users, success_rate)
+  
+  temp <- rbind(temp, row)
+}
+
+# plot success rates
+ggplot(temp, aes(x = profiles, y = success_rate)) +
+  geom_line() +
+  geom_point() +
+  theme_ipsum() +
+  scale_y_continuous(labels = percent) +
+  scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, 2)) +
+  labs(x = "N or More Profiles Added in First Week", y = NULL, title = "Success Rate",
+       subtitle = "For Users With At Least X Profiles")
+```
+
+There don't appear to be any inflection points here, and we can't really influence how many social accounts users have in general, so I may not recommend using profiles in an activation metric, despite the strong correlation.
+
+### Days Active
+Finally we'll look at the number of days active in the first week.
+
+```{r echo = FALSE}
+users %>% 
+  filter(days_active <= 7) %>% 
+  group_by(days_active, successful) %>% 
+  summarise(users = n_distinct(user_id)) %>% 
+  mutate(percent = users / sum(users)) %>% 
+  filter(successful & !is.na(days_active)) %>% 
+  ggplot(aes(x = days_active, y = percent)) +
+  geom_bar(stat = 'identity') +
+  theme_ipsum() +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Days Active", y = NULL,
+       title = "Success Rate by Days Active", 
+       subtitle = "Success: Retained for 90 Days")
+```
+
+We see a significant jump in the success rate when the number of days active increases from one to two. Therefore, **I might suggest an activation metric of at least 3 updates, at least 2 profiles, and at least 2 days active in the first week**.
+
+### Activation Metric
+Let's see how many users activated, if we use this metric, and what their retention rate was.
+
+```{r}
+# determine if activated
+users <- users %>% 
+  mutate(activated = (updates >= 3 & days_active >= 2)) 
+```
+
+Let's see the proportion of users that activated.
+
+```{r}
+# get activation rate
+users %>% 
+  group_by(activated) %>% 
+  summarise(users = n_distinct(user_id)) %>% 
+  mutate(percent = users / sum(users))
+```
+
+Around 17% of users activated. Let's see how likely activated users are to be retained compoared to unactivated users.
+
+```{r}
+# see success rate
+users %>% 
+  group_by(activated, successful) %>% 
+  summarise(users = n_distinct(user_id)) %>% 
+  mutate(percent = users / sum(users)) %>% 
+  filter(successful)
+```
+
+Around 26% of users that did not activate were retained for three months, whereas 42% of users that activated were retained. Activated users are more than 60% more likely to be retained for three months by this definition.

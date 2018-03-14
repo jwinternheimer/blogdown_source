@@ -144,7 +144,7 @@ weekly_usage %>%
        subtitle = "Transparent: Shared in Public Channel", color = "Shared Publicly")
 ```
 
-We can see that there is quite a large gap. For the most part, with exceptions, less than 40% of all messages are shared "transparently". On average, around 65% of all Slack messages have been sent in private channels and DMs. Just to reiterate, I know that many DMs wouldn't be beneficial for the team to see publicly and would only add clutter and noise. Even so, 65% feels high. 
+We can see that there is quite a large gap. For the most part, with exceptions, less than 40% of all messages are shared "transparently". On average, around 65% of all Slack messages have been sent in private channels and DMs. Just to reiterate, I know that many DMs wouldn't be beneficial for the team to see publicly and would only add clutter and noise. I chat with friends in DMs all the time! 
 
 ```{r include = FALSE}
 # unload lubridate package
