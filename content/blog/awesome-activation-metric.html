@@ -72,10 +72,9 @@ group by 1, 2, 3, 4, 5, 6, 7</code></pre>
 awesome &lt;- awesome %&gt;% 
   mutate(days_on_plan = ifelse(is.na(canceled_at), 
                                as.numeric(Sys.Date() - started_at),
-                               as.numeric(canceled_at - started_at)))</code></pre>
-<pre><code>## Warning in as.POSIXlt.POSIXct(Sys.time()): unknown timezone &#39;zone/tz/2018c.
-## 1.0/zoneinfo/America/New_York&#39;</code></pre>
-<pre class="r"><code># indicate if user was retained
+                               as.numeric(canceled_at - started_at)))
+
+# indicate if user was retained
 awesome &lt;- awesome %&gt;% 
   mutate(retained = days_on_plan &gt; 180)</code></pre>
 <p>We can see the proportion of customers that were retained for three months – we’ll segment by the plan type because annual customers are probably more likely to be retained.</p>
@@ -203,5 +202,7 @@ awesome %&gt;%
 ## 3 T         F         9834   0.311
 ## 4 T         T        21751   0.689</code></pre>
 <p>This might not be a good indicator. It only increases the likelihood of being retained by a few percentage points. :-<br />
-</p>
+### Time Before Upgrading Just for kicks and giggles, let’s visualize the distribution on the number of days between the signup date and subscription start date.</p>
+<p><img src="/blog/awesome-activation-metric_files/figure-html/unnamed-chunk-20-1.png" width="672" /></p>
+<p>We can see that the distribution is quite wide. A higher percentage of users that were retained started their subscriptions shortly after signing up.</p>
 </div>

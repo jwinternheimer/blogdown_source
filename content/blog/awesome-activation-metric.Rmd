@@ -102,7 +102,7 @@ awesome <- readRDS('awesome-activation.rds')
 
 We have around 50 thousand Awesome users to analyze. We need to add a column to indicate if the user was retained for at least 180 days.
 
-```{r}
+```{r warning = FALSE, message = FALSE}
 # determine subscription length
 awesome <- awesome %>% 
   mutate(days_on_plan = ifelse(is.na(canceled_at), 
@@ -167,12 +167,12 @@ Moving on, we should look at the distribution of the number of updates Awesome u
 This is the type of distribution we'd expect to see. Most users create low number of updates, but there is a long tail of users that create _many_ updates during their first week on the Awesome plan. Somehow a few users manage to create tens of thousands of them. How?
 
 ```{r echo = FALSE, warning = FALSE, message = FALSE}
-ggplot(awesome, aes(x = updates)) +
-  geom_density(fill = 'black', alpha = 0.4) +
+ggplot(filter(awesome, plan_id == 'pro-monthly'), aes(x = updates, color = retained, fill = retained)) +
+  geom_density(alpha = 0.4) +
   scale_x_continuous(limits = c(0, 500)) +
   theme_ipsum() +
   labs(x = "Number of Updates", y = NULL, title = "Distribution of Updates Created",
-       subtitle = "First Week on Awesome Plan")
+       subtitle = "First Week on Awesome Monthhly Plan")
 ```
 
 We can calculate the 99th percentile for updates again, in case there are strange outliers.
@@ -271,7 +271,7 @@ We can see here that the biggest jump comes from being active at least two days.
 ### Number of Profiles
 We'll take the same approach for profiles.
 
-```{r echo = FALSE}
+```{r echo = FALSE, warning = FALSE, message = FALSE}
 # define cuts
 cuts <- c(-Inf, 0, 1, 3, 5, 10, Inf)
 
@@ -283,7 +283,8 @@ awesome %>%
   mutate(percent = users / sum(users)) %>% 
   filter(retained) %>% 
   ggplot(aes(x = profile_bin, y = percent, color = plan_id)) +
-  geom_point(size = 3) +
+  geom_point() +
+  geom_line(aes(group = plan_id)) +
   theme_ipsum() +
   scale_y_continuous(labels = percent) +
   labs(x = "Number of Profiles", y = NULL, title = "Six Month Retention Rate by Profile Bin",
@@ -370,3 +371,25 @@ awesome %>%
 ```
 
 This might not be a good indicator. It only increases the likelihood of being retained by a few percentage points. :-\
+
+### Time Before Upgrading
+Just for kicks and giggles, let's visualize the distribution on the number of days between the signup date and subscription start date.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# calculate days since signup
+awesome <- awesome %>% 
+  mutate(days_since_signup = as.numeric(started_at - signup_date))
+
+# plot distribution
+awesome %>% 
+  filter(plan_id == 'pro-monthly') %>% 
+  ggplot(aes(x = days_since_signup, color = retained)) +
+  geom_density(alpha = 0.3, aes(fill = retained)) +
+  coord_cartesian(xlim = c(0, 1000)) +
+  scale_x_continuous(limits = c(0, 1000)) +
+  theme_ipsum() +
+  labs(x = "Days Since Signing Up", y = NULL, title = "Distribution of Account Age",
+       color = "Retained", fill = "Retained")
+```
+
+We can see that the distribution is quite wide. A higher percentage of users that were retained started their subscriptions shortly after signing up.
