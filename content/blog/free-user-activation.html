@@ -35,6 +35,15 @@ last_active_date as (
   where was_sent_with_buffer
   and status != &#39;failed&#39;
   and created_at &gt; &#39;2016-12-01&#39;
+  and client_id in (
+        &#39;5022676c169f37db0e00001c&#39;, -- API and Extension
+        &#39;4e9680c0512f7ed322000000&#39;, -- iOS App
+        &#39;4e9680b8512f7e6b22000000&#39;, -- Android App
+        &#39;5022676c169f37db0e00001c&#39;, -- Feeds
+        &#39;5022676c169f37db0e00001c&#39;, -- Power Scheduler
+        &#39;539e533c856c49c654ed5e47&#39;, -- Buffer for Mac
+        &#39;5305d8f7e4c1560b50000008&#39;  -- Buffer Wordpress Plugin
+        )
   group by 1
 )
 
@@ -76,8 +85,8 @@ users %&gt;%
 <pre><code>## # A tibble: 2 x 3
 ##   successful   users percent
 ##   &lt;lgl&gt;        &lt;int&gt;   &lt;dbl&gt;
-## 1 F          1022152   0.710
-## 2 T           417079   0.290</code></pre>
+## 1 F          1028578   0.715
+## 2 T           410653   0.285</code></pre>
 <p>Around 29% of users were retained for three months.</p>
 </div>
 <div id="searching-for-activation" class="section level3">
@@ -95,32 +104,32 @@ summary(mod)</code></pre>
 ## 
 ## Deviance Residuals: 
 ##     Min       1Q   Median       3Q      Max  
-## -6.3761  -0.8256  -0.7762   1.3831   3.5820  
+## -5.6509  -0.8173  -0.7784   1.4191   2.8803  
 ## 
 ## Coefficients:
-##               Estimate Std. Error z value Pr(&gt;|z|)    
-## (Intercept) -1.110e+00  2.570e-03 -431.75   &lt;2e-16 ***
-## profiles     6.416e-02  1.353e-03   47.43   &lt;2e-16 ***
-## updates     -4.376e-04  3.634e-05  -12.04   &lt;2e-16 ***
-## days_active  1.448e-01  1.283e-03  112.80   &lt;2e-16 ***
+##               Estimate Std. Error  z value Pr(&gt;|z|)    
+## (Intercept) -1.1041152  0.0025668 -430.157   &lt;2e-16 ***
+## profiles     0.0651174  0.0013520   48.163   &lt;2e-16 ***
+## updates     -0.0002771  0.0000295   -9.394   &lt;2e-16 ***
+## days_active  0.1143397  0.0012843   89.028   &lt;2e-16 ***
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
 ## (Dispersion parameter for binomial family taken to be 1)
 ## 
-##     Null deviance: 1732737  on 1439230  degrees of freedom
-## Residual deviance: 1712268  on 1439227  degrees of freedom
-## AIC: 1712276
+##     Null deviance: 1721077  on 1439230  degrees of freedom
+## Residual deviance: 1706614  on 1439227  degrees of freedom
+## AIC: 1706622
 ## 
 ## Number of Fisher Scoring iterations: 5</code></pre>
 <p>All three metrics seem to have very significant effects on the probability of a user being successful. Interesting, the correlation between updates and success is negative! I have a hunch that this is because of outliers, folks that send thousands of updates in their first days. Let’s remove them from the dataset.</p>
 <pre class="r"><code># find quantiles for updates
-quantile(users$updates, probs = c(0, 0.5, 0.99, 0.995))</code></pre>
-<pre><code>##    0%   50%   99% 99.5% 
-##     0     0    75   117</code></pre>
-<p>The 99th percentile for updates created in the first week is 75, so let’s remove users that created 100 or more updates in their first week.</p>
+quantile(users$updates, probs = c(0, 0.5, 0.99, 0.995, 0.999))</code></pre>
+<pre><code>##    0%   50%   99% 99.5% 99.9% 
+##     0     0    75   117   414</code></pre>
+<p>The 99th percentile for updates created in the first week is 75 and the 99.5th percentile is 117, so let’s remove users that created 120 or more updates in their first week.</p>
 <pre class="r"><code># remove outliers
-users &lt;- filter(users, updates &lt; 100)</code></pre>
+users &lt;- filter(users, updates &lt; 120)</code></pre>
 <p>Now let’s rebuild the model.</p>
 <pre class="r"><code># define logistic regression model
 mod &lt;- glm(successful ~ profiles + updates + days_active, data = users, family = &quot;binomial&quot;)
@@ -134,22 +143,22 @@ summary(mod)</code></pre>
 ## 
 ## Deviance Residuals: 
 ##     Min       1Q   Median       3Q      Max  
-## -3.8555  -0.8085  -0.7785   1.3988   1.6631  
+## -3.8116  -0.7995  -0.7807   1.4352   1.6600  
 ## 
 ## Coefficients:
-##              Estimate Std. Error z value Pr(&gt;|z|)    
-## (Intercept) -1.094146   0.002630 -416.04   &lt;2e-16 ***
-## profiles     0.055697   0.001445   38.54   &lt;2e-16 ***
-## updates      0.012799   0.000250   51.19   &lt;2e-16 ***
-## days_active  0.075354   0.001801   41.84   &lt;2e-16 ***
+##               Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept) -1.0872522  0.0026230 -414.51   &lt;2e-16 ***
+## profiles     0.0552942  0.0014378   38.46   &lt;2e-16 ***
+## updates      0.0136422  0.0002267   60.18   &lt;2e-16 ***
+## days_active  0.0396148  0.0017628   22.47   &lt;2e-16 ***
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
 ## (Dispersion parameter for binomial family taken to be 1)
 ## 
-##     Null deviance: 1718696  on 1429914  degrees of freedom
-## Residual deviance: 1697077  on 1429911  degrees of freedom
-## AIC: 1697085
+##     Null deviance: 1710867  on 1432247  degrees of freedom
+## Residual deviance: 1693257  on 1432244  degrees of freedom
+## AIC: 1693265
 ## 
 ## Number of Fisher Scoring iterations: 4</code></pre>
 <p>That’s much more like it. :)</p>
@@ -183,7 +192,7 @@ users %&gt;%
 <p>The graph below shows the proportion of users with at least X updates that were reteined for three months. We can see that there are diminishing returns, but it is tough to tell where an inflection point might be. One feature that is cool to see is the little bump at 11 updates. This exists because of the <em>queue limit</em>. Whene a user signs up for Buffer on a free plan, they can only have 10 updates scheduled at one time for a single profile.</p>
 <p>What would this grpah look like if we zoomed into only look at 1-15 updates?</p>
 <p><img src="/blog/free-user-activation_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
-<p>To my eyes, <strong>three</strong> updates seems as good a choice as we can get. There are clear diminishing returns after three updates, and a significant number of users (358 thousand) did successfully take the action.</p>
+<p>To my eyes, <strong>three</strong> updates seems as good a choice as any. There are clear diminishing returns after three updates, and a significant number of users (358 thousand) did successfully take the action.</p>
 </div>
 <div id="profiles" class="section level3">
 <h3>Profiles</h3>
@@ -195,7 +204,7 @@ users %&gt;%
 </div>
 <div id="days-active" class="section level3">
 <h3>Days Active</h3>
-<p>Finally we’ll look at the number of days active in the first week.</p>
+<p>Finally we’ll look at the number of days active in the first week. How are there successful users with no days active? These users didn’t send any updates. We’ll have to look into that.</p>
 <p><img src="/blog/free-user-activation_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
 <p>We see a significant jump in the success rate when the number of days active increases from one to two. Therefore, <strong>I might suggest an activation metric of at least 3 updates, at least 2 profiles, and at least 2 days active in the first week</strong>.</p>
 </div>
@@ -214,8 +223,8 @@ users %&gt;%
 <pre><code>## # A tibble: 2 x 3
 ##   activated   users percent
 ##   &lt;lgl&gt;       &lt;int&gt;   &lt;dbl&gt;
-## 1 F         1184562   0.828
-## 2 T          245353   0.172</code></pre>
+## 1 F         1184805   0.827
+## 2 T          247443   0.173</code></pre>
 <p>Around 17% of users activated. Let’s see how likely activated users are to be retained compoared to unactivated users.</p>
 <pre class="r"><code># see success rate
 users %&gt;% 
@@ -227,7 +236,7 @@ users %&gt;%
 ## # Groups:   activated [2]
 ##   activated successful  users percent
 ##   &lt;lgl&gt;     &lt;lgl&gt;       &lt;int&gt;   &lt;dbl&gt;
-## 1 F         T          308803   0.261
-## 2 T         T          104005   0.424</code></pre>
-<p>Around 26% of users that did not activate were retained for three months, whereas 42% of users that activated were retained. Activated users are more than 60% more likely to be retained for three months by this definition.</p>
+## 1 F         T          307285   0.259
+## 2 T         T          100365   0.406</code></pre>
+<p>Around 26% of users that did not activate were retained for three months, whereas 41% of users that activated were retained. Activated users are more than 60% more likely to be retained for three months by this definition.</p>
 </div>

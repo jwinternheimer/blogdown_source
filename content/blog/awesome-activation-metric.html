@@ -1,0 +1,207 @@
+---
+date: 2018-03-15T09:49:13-04:00
+type: "post"
+tags: []
+title: "An Activation Metric for Paying Users"
+subtitle: "Which Behaviors Indicate Retention?"
+---
+
+
+
+<p>In a <a href="https://jwinternheimer.github.io/blog/free-user-activation/">previous analysis</a> we used some simple EDA techniques to explore “activation” for new Buffer users.</p>
+<p>In this analysis, we’ll use a similar approach to explore what activation could look like for users that subscribe to Buffer’s Awesome plan. We’ll define success in this case as being retained – not cancelling the subscription – for at least six months.</p>
+<p>The features we’ll analyze are:</p>
+<ul>
+<li>The number of days that the user was a Buffer user before becoming a paid customer.</li>
+<li>The number of profiles the user added in the first week on the Awesome plan.</li>
+<li>The number of updates per profiles created during the first week.</li>
+<li>The number of days active during the first week.</li>
+</ul>
+<p>Let’s collect the data.</p>
+<div id="data-collection" class="section level3">
+<h3>Data Collection</h3>
+<p>We’ll run the queries below to collect the data we need. We only want to get Awesome customers that have paid us successfully and that were active at least six months ago.</p>
+<pre class="sql"><code>with awesome_users as (
+  select 
+    s.id as subscription_id
+    , s.customer as customer_id
+    , u.user_id
+    , date(u.created_at) as signup_date
+    , date(s.start) as started_at
+    , date(s.canceled_at) as canceled_at
+    , s.plan_id
+  from stripe._subscriptions as s
+  inner join dbt.users as u on s.customer = u.billing_stripe_id
+  inner join stripe._invoices as i on i.subscription_id = s.id
+  inner join stripe._charges as c on c.invoice = i.id
+    and c.captured
+    and c.refunded = false
+  where s.plan_id in (&#39;pro-monthly&#39;, &#39;pro-annual&#39;)
+  and s.start &gt;= &#39;2016-09-01&#39; and s.start &lt; &#39;2017-09-01&#39;
+)
+select 
+  a.subscription_id
+  , a.customer_id
+  , a.user_id
+  , a.signup_date
+  , a.started_at
+  , a.canceled_at
+  , a.plan_id
+  , count(distinct up.id) as updates
+  , count(distinct p.id) as profiles
+  , count(distinct date(up.created_at)) as days_active
+from awesome_users as a
+left join dbt.updates as up on a.user_id = up.user_id
+  and (up.created_at &gt; a.started_at and datediff(day, a.started_at, up.created_at) &lt; 7)
+  and up.was_sent_with_buffer
+  and up.status != &#39;failed&#39;
+  and up.client_id in (
+      &#39;5022676c169f37db0e00001c&#39;, -- API and Extension
+      &#39;4e9680c0512f7ed322000000&#39;, -- iOS App
+      &#39;4e9680b8512f7e6b22000000&#39;, -- Android App
+      &#39;5022676c169f37db0e00001c&#39;, -- Feeds
+      &#39;5022676c169f37db0e00001c&#39;, -- Power Scheduler
+      &#39;539e533c856c49c654ed5e47&#39;, -- Buffer for Mac
+      &#39;5305d8f7e4c1560b50000008&#39;  -- Buffer Wordpress Plugin
+      )
+left join dbt.profiles as p on a.user_id = p.user_id
+  and p.created_at &gt; a.started_at and datediff(day, a.started_at, p.created_at) &lt; 7
+group by 1, 2, 3, 4, 5, 6, 7</code></pre>
+<p>We have around 50 thousand Awesome users to analyze. We need to add a column to indicate if the user was retained for at least 180 days.</p>
+<pre class="r"><code># determine subscription length
+awesome &lt;- awesome %&gt;% 
+  mutate(days_on_plan = ifelse(is.na(canceled_at), 
+                               as.numeric(Sys.Date() - started_at),
+                               as.numeric(canceled_at - started_at)))</code></pre>
+<pre><code>## Warning in as.POSIXlt.POSIXct(Sys.time()): unknown timezone &#39;zone/tz/2018c.
+## 1.0/zoneinfo/America/New_York&#39;</code></pre>
+<pre class="r"><code># indicate if user was retained
+awesome &lt;- awesome %&gt;% 
+  mutate(retained = days_on_plan &gt; 180)</code></pre>
+<p>We can see the proportion of customers that were retained for three months – we’ll segment by the plan type because annual customers are probably more likely to be retained.</p>
+<pre class="r"><code># get retention rate
+awesome %&gt;% 
+  group_by(plan_id, retained) %&gt;% 
+  summarise(users = n_distinct(customer_id)) %&gt;% 
+  mutate(percent = users / sum(users)) %&gt;% 
+  filter(retained)</code></pre>
+<pre><code>## # A tibble: 2 x 4
+## # Groups:   plan_id [2]
+##   plan_id     retained users percent
+##   &lt;chr&gt;       &lt;lgl&gt;    &lt;int&gt;   &lt;dbl&gt;
+## 1 pro-annual  T        12510   0.969
+## 2 pro-monthly T        19384   0.560</code></pre>
+<p>We see here that around 56% of Awesome monthly customers were retained for six months, whereas around 97% of annual customers were retained for six months!</p>
+<p>Alright, now we’re ready for some exploratory analysis.</p>
+</div>
+<div id="exploratory-analysis" class="section level3">
+<h3>Exploratory Analysis</h3>
+<p>Let’s quickly visualize the distribution of updates, profiles, and days active.</p>
+<p><img src="/blog/awesome-activation-metric_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>It’s striking to see again that many users that were not active at all during their first week on the Awesome plan! Our definition of “active” here is having scheduled at least one post with Buffer on any given day. Let’s look at profiles now.</p>
+<p><img src="/blog/awesome-activation-metric_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>We can see that most awesome users don’t add any profiles in their first week on the Awesome plan? Could it be that they had already been connected? What is going on there?</p>
+<p>Moving on, we should look at the distribution of the number of updates Awesome users created in their first week on the plan.</p>
+<p>This is the type of distribution we’d expect to see. Most users create low number of updates, but there is a long tail of users that create <em>many</em> updates during their first week on the Awesome plan. Somehow a few users manage to create tens of thousands of them. How?</p>
+<p><img src="/blog/awesome-activation-metric_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>We can calculate the 99th percentile for updates again, in case there are strange outliers.</p>
+<pre class="r"><code># get quantiles
+quantile(awesome$updates, probs = c(0.25, 0.5, 0.75, 0.9, 0.99))</code></pre>
+<pre><code>## 25% 50% 75% 90% 99% 
+##   6  21  51 106 445</code></pre>
+<p>The 90th percentile is 106 updates and the 99th is 317 updates created in the first week, so we might remove users that have created 400 or more updates in their first week. That’s a lot!</p>
+<pre class="r"><code># remove potential outliers
+awesome &lt;- awesome %&gt;% 
+  filter(updates &lt; 400)</code></pre>
+<p>Now let’s run a logistic regression model to see how these features correlate with a user being retained for six months.</p>
+<pre class="r"><code># build model
+mod &lt;- glm(retained ~ profiles + updates + days_active + plan_id, data = awesome, family = &#39;binomial&#39;)
+
+# summarise model
+summary(mod)</code></pre>
+<pre><code>## 
+## Call:
+## glm(formula = retained ~ profiles + updates + days_active + plan_id, 
+##     family = &quot;binomial&quot;, data = awesome)
+## 
+## Deviance Residuals: 
+##     Min       1Q   Median       3Q      Max  
+## -2.7759  -1.2070   0.2571   1.0792   1.3374  
+## 
+## Coefficients:
+##                      Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept)         3.2829605  0.0531479  61.770  &lt; 2e-16 ***
+## profiles           -0.0193040  0.0048597  -3.972 7.12e-05 ***
+## updates            -0.0005385  0.0002205  -2.442   0.0146 *  
+## days_active         0.0810522  0.0062563  12.955  &lt; 2e-16 ***
+## plan_idpro-monthly -3.2654534  0.0521844 -62.575  &lt; 2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## (Dispersion parameter for binomial family taken to be 1)
+## 
+##     Null deviance: 61873  on 48162  degrees of freedom
+## Residual deviance: 52051  on 48158  degrees of freedom
+## AIC: 52061
+## 
+## Number of Fisher Scoring iterations: 6</code></pre>
+<p>Alright, we can see here that there is a strong correlation between the likelihood of being retained for six months and the number of profiles, updates, and days active. We control for plan type here.</p>
+<p>The number of updates sent and the number of days active do have a strong correlation - however, interestingly, the relationship between updates and the likelihood of being retained is negative! We will need to investigate further.</p>
+<p>Let’s first look at the number of days active.</p>
+</div>
+<div id="days-active-in-first-week" class="section level3">
+<h3>Days Active in First Week</h3>
+<p>Remember we define a user as “active” on a day if he or she creates at least one update with Buffer on that day. Let’s look at the proportion of users that were retained for each number of days active in the first week on the Awesome plan.</p>
+<p><img src="/blog/awesome-activation-metric_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
+<p>We can see that, for monthly plans, being active for at least two days during the first week on the plan increases the likelihood of being retained, only by around 5% though.</p>
+<p><img src="/blog/awesome-activation-metric_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
+<p>We can see here that the biggest jump comes from being active at least two days. However, this jump is pretty small, only a couple of percentage points.</p>
+</div>
+<div id="number-of-profiles" class="section level3">
+<h3>Number of Profiles</h3>
+<p>We’ll take the same approach for profiles.</p>
+<p><img src="/blog/awesome-activation-metric_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+<p>We can see the negative correlation between profiles added likelihook of being retained. There doesn’t seem to be too much here…</p>
+<p>Let’s look at updates.</p>
+</div>
+<div id="updates" class="section level3">
+<h3>Updates</h3>
+<pre class="r"><code># define cuts
+cuts &lt;- c(0, 10, 50, 100, 200, 500)
+
+# plot distribution of updates
+awesome %&gt;% 
+  filter(plan_id == &#39;pro-monthly&#39;) %&gt;% 
+  mutate(update_bin = cut(updates, breaks = cuts, include.lowest = TRUE)) %&gt;% 
+  group_by(plan_id, update_bin, retained) %&gt;% 
+  summarise(users = n_distinct(customer_id)) %&gt;% 
+  mutate(percent = users / sum(users)) %&gt;% 
+  filter(retained) %&gt;% 
+  ggplot(aes(x = update_bin, y = percent)) +
+  geom_bar(stat = &#39;identity&#39;) +
+  theme_ipsum() +
+  scale_y_continuous(labels = percent) +
+  labs(x = &quot;Number of Updates&quot;, y = NULL, title = &quot;Six Month Retention Rate by Update Bin&quot;,
+       subtitle = &quot;First Week on Awesome Plan&quot;)</code></pre>
+<p><img src="/blog/awesome-activation-metric_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+<p>There does appear to be a jump when you go from 9-10 to 11-50 updates. Let’s dig a little deeper.</p>
+<p><img src="/blog/awesome-activation-metric_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
+<p>Interestingly, there is a strong positive correlation until we reach around 15 updates. I suppose we could use 10 updates in the first week as an activation metric. I’m not sure.</p>
+<p>Let’s suppose that we say that’s it. A user is activated if he or she created 10 or more updates during the first week on the plan. How would that affect the retention rates?</p>
+<pre class="r"><code># define activation
+awesome %&gt;% 
+  mutate(activated = updates &gt;= 10) %&gt;% 
+  group_by(activated, retained) %&gt;% 
+  summarise(users = n_distinct(customer_id)) %&gt;% 
+  mutate(percent = users / sum(users))</code></pre>
+<pre><code>## # A tibble: 4 x 4
+## # Groups:   activated [2]
+##   activated retained users percent
+##   &lt;lgl&gt;     &lt;lgl&gt;    &lt;int&gt;   &lt;dbl&gt;
+## 1 F         F         5828   0.371
+## 2 F         T         9876   0.629
+## 3 T         F         9834   0.311
+## 4 T         T        21751   0.689</code></pre>
+<p>This might not be a good indicator. It only increases the likelihood of being retained by a few percentage points. :-<br />
+</p>
+</div>

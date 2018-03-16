@@ -53,6 +53,15 @@ last_active_date as (
   where was_sent_with_buffer
   and status != 'failed'
   and created_at > '2016-12-01'
+  and client_id in (
+        '5022676c169f37db0e00001c', -- API and Extension
+        '4e9680c0512f7ed322000000', -- iOS App
+        '4e9680b8512f7e6b22000000', -- Android App
+        '5022676c169f37db0e00001c', -- Feeds
+        '5022676c169f37db0e00001c', -- Power Scheduler
+        '539e533c856c49c654ed5e47', -- Buffer for Mac
+        '5305d8f7e4c1560b50000008'  -- Buffer Wordpress Plugin
+        )
   group by 1
 )
 
@@ -125,14 +134,14 @@ All three metrics seem to have very significant effects on the probability of a 
 
 ```{r}
 # find quantiles for updates
-quantile(users$updates, probs = c(0, 0.5, 0.99, 0.995))
+quantile(users$updates, probs = c(0, 0.5, 0.99, 0.995, 0.999))
 ```
 
-The 99th percentile for updates created in the first week is 75, so let's remove users that created 100 or more updates in their first week.
+The 99th percentile for updates created in the first week is 75 and the 99.5th percentile is 117, so let's remove users that created 120 or more updates in their first week.
 
 ```{r}
 # remove outliers
-users <- filter(users, updates < 100)
+users <- filter(users, updates < 120)
 ```
 
 Now let's rebuild the model.
@@ -229,7 +238,7 @@ ggplot(temp, aes(x = updates, y = success_rate)) +
        subtitle = "For Users With At Least X Updates")
 ```
 
-To my eyes, **three** updates seems as good a choice as we can get. There are clear diminishing returns after three updates, and a significant number of users (358 thousand) did successfully take the action.
+To my eyes, **three** updates seems as good a choice as any. There are clear diminishing returns after three updates, and a significant number of users (358 thousand) did successfully take the action.
 
 ### Profiles
 We'll take the same approach to look at profiles.
@@ -301,7 +310,7 @@ ggplot(temp, aes(x = profiles, y = success_rate)) +
 There don't appear to be any inflection points here, and we can't really influence how many social accounts users have in general, so I may not recommend using profiles in an activation metric, despite the strong correlation.
 
 ### Days Active
-Finally we'll look at the number of days active in the first week.
+Finally we'll look at the number of days active in the first week. How are there successful users with no days active? These users didn't send any updates. We'll have to look into that.
 
 ```{r echo = FALSE}
 users %>% 
@@ -351,4 +360,4 @@ users %>%
   filter(successful)
 ```
 
-Around 26% of users that did not activate were retained for three months, whereas 42% of users that activated were retained. Activated users are more than 60% more likely to be retained for three months by this definition.
+Around 26% of users that did not activate were retained for three months, whereas 41% of users that activated were retained. Activated users are more than 60% more likely to be retained for three months by this definition.

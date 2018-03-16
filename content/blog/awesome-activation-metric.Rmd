@@ -1,0 +1,372 @@
+---
+date: 2018-03-15T09:49:13-04:00
+type: "post"
+tags: []
+title: "An Activation Metric for Paying Users"
+subtitle: "Which Behaviors Indicate Retention?"
+---
+
+In a [previous analysis](https://jwinternheimer.github.io/blog/free-user-activation/) we used some simple EDA techniques to explore "activation" for new Buffer users. 
+
+In this analysis, we'll use a similar approach to explore what activation could look like for users that subscribe to Buffer's Awesome plan. We'll define success in this case as being retained -- not cancelling the subscription -- for at least six months.
+
+The features we'll analyze are:
+
+ - The number of days that the user was a Buffer user before becoming a paid customer.
+ - The number of profiles the user added in the first week on the Awesome plan.
+ - The number of updates per profiles created during the first week.
+ - The number of days active during the first week.
+
+Let's collect the data.
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+# load libraries
+library(buffer)
+library(dplyr)
+library(ggplot2)
+library(hrbrthemes)
+library(scales)
+```
+
+### Data Collection
+We'll run the queries below to collect the data we need. We only want to get Awesome customers that have paid us successfully and that were active at least six months ago. 
+
+```{r include = FALSE}
+# connect to redshift
+con <- redshift_connect()
+```
+
+```{sql eval = FALSE}
+with awesome_users as (
+  select 
+    s.id as subscription_id
+    , s.customer as customer_id
+    , u.user_id
+    , date(u.created_at) as signup_date
+    , date(s.start) as started_at
+    , date(s.canceled_at) as canceled_at
+    , s.plan_id
+  from stripe._subscriptions as s
+  inner join dbt.users as u on s.customer = u.billing_stripe_id
+  inner join stripe._invoices as i on i.subscription_id = s.id
+  inner join stripe._charges as c on c.invoice = i.id
+    and c.captured
+    and c.refunded = false
+  where s.plan_id in ('pro-monthly', 'pro-annual')
+  and s.start >= '2016-09-01' and s.start < '2017-09-01'
+)
+select 
+  a.subscription_id
+  , a.customer_id
+  , a.user_id
+  , a.signup_date
+  , a.started_at
+  , a.canceled_at
+  , a.plan_id
+  , count(distinct up.id) as updates
+  , count(distinct p.id) as profiles
+  , count(distinct date(up.created_at)) as days_active
+from awesome_users as a
+left join dbt.updates as up on a.user_id = up.user_id
+  and (up.created_at > a.started_at and datediff(day, a.started_at, up.created_at) < 7)
+  and up.was_sent_with_buffer
+  and up.status != 'failed'
+  and up.client_id in (
+      '5022676c169f37db0e00001c', -- API and Extension
+      '4e9680c0512f7ed322000000', -- iOS App
+      '4e9680b8512f7e6b22000000', -- Android App
+      '5022676c169f37db0e00001c', -- Feeds
+      '5022676c169f37db0e00001c', -- Power Scheduler
+      '539e533c856c49c654ed5e47', -- Buffer for Mac
+      '5305d8f7e4c1560b50000008'  -- Buffer Wordpress Plugin
+      )
+left join dbt.profiles as p on a.user_id = p.user_id
+  and p.created_at > a.started_at and datediff(day, a.started_at, p.created_at) < 7
+group by 1, 2, 3, 4, 5, 6, 7
+```
+
+```{r include = FALSE, eval = FALSE}
+# set data types
+awesome$updates <- as.integer(awesome$updates)
+awesome$days_active <- as.integer(awesome$days_active)
+awesome$profiles <- as.integer(awesome$profiles)
+```
+
+```{r include = FALSE}
+# save data
+# saveRDS(awesome, file = 'awesome-activation.rds')
+
+# read data
+awesome <- readRDS('awesome-activation.rds')
+```
+
+We have around 50 thousand Awesome users to analyze. We need to add a column to indicate if the user was retained for at least 180 days.
+
+```{r}
+# determine subscription length
+awesome <- awesome %>% 
+  mutate(days_on_plan = ifelse(is.na(canceled_at), 
+                               as.numeric(Sys.Date() - started_at),
+                               as.numeric(canceled_at - started_at)))
+
+# indicate if user was retained
+awesome <- awesome %>% 
+  mutate(retained = days_on_plan > 180)
+```
+
+We can see the proportion of customers that were retained for three months -- we'll segment by the plan type because annual customers are probably more likely to be retained.
+
+```{r}
+# get retention rate
+awesome %>% 
+  group_by(plan_id, retained) %>% 
+  summarise(users = n_distinct(customer_id)) %>% 
+  mutate(percent = users / sum(users)) %>% 
+  filter(retained)
+```
+
+We see here that around 56% of Awesome monthly customers were retained for six months, whereas around 97% of annual customers were retained for six months! 
+
+Alright, now we're ready for some exploratory analysis.
+
+### Exploratory Analysis
+Let's quickly visualize the distribution of updates, profiles, and days active.
+
+```{r echo = FALSE}
+# plot distribution of days active
+awesome %>% 
+  count(days_active) %>% 
+  ggplot(aes(x = days_active, y = n)) +
+  geom_bar(stat = 'identity') +
+  theme_ipsum() +
+  labs(x = "Days Active in First Week", y = NULL, title = "Number of Days Active",
+       subtitle = "First Week on Awesome Plan")
+```
+
+It's striking to see again that many users that were not active at all during their first week on the Awesome plan! Our definition of "active" here is having scheduled at least one post with Buffer on any given day. Let's look at profiles now.
+
+```{r echo = FALSE}
+# define cuts
+cuts <- c(-Inf, 0, 1, 3, 5, 10, Inf)
+
+# plot distribution of profiles
+awesome %>% 
+  mutate(profile_bin = cut(profiles, breaks = cuts)) %>% 
+  count(profile_bin) %>% 
+  ggplot(aes(x = profile_bin, y = n)) +
+  geom_bar(stat = 'identity') +
+  theme_ipsum() +
+  labs(x = "Number of Profiles", y = NULL, title = "Number of Profiles",
+       subtitle = "First Week on Awesome Plan")
+```
+
+We can see that most awesome users don't add any profiles in their first week on the Awesome plan? Could it be that they had already been connected? What is going on there?
+
+Moving on, we should look at the distribution of the number of updates Awesome users created in their first week on the plan.
+
+This is the type of distribution we'd expect to see. Most users create low number of updates, but there is a long tail of users that create _many_ updates during their first week on the Awesome plan. Somehow a few users manage to create tens of thousands of them. How?
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+ggplot(awesome, aes(x = updates)) +
+  geom_density(fill = 'black', alpha = 0.4) +
+  scale_x_continuous(limits = c(0, 500)) +
+  theme_ipsum() +
+  labs(x = "Number of Updates", y = NULL, title = "Distribution of Updates Created",
+       subtitle = "First Week on Awesome Plan")
+```
+
+We can calculate the 99th percentile for updates again, in case there are strange outliers.
+
+```{r}
+# get quantiles
+quantile(awesome$updates, probs = c(0.25, 0.5, 0.75, 0.9, 0.99))
+```
+
+The 90th percentile is 106 updates and the 99th is 317 updates created in the first week, so we might remove users that have created 400 or more updates in their first week. That's a lot!
+
+```{r}
+# remove potential outliers
+awesome <- awesome %>% 
+  filter(updates < 400)
+```
+
+Now let's run a logistic regression model to see how these features correlate with a user being retained for six months.
+
+```{r}
+# build model
+mod <- glm(retained ~ profiles + updates + days_active + plan_id, data = awesome, family = 'binomial')
+
+# summarise model
+summary(mod)
+```
+
+Alright, we can see here that there is a strong correlation between the likelihood of being retained for six months and the number of profiles, updates, and days active. We control for plan type here. 
+
+The number of updates sent and the number of days active do have a strong correlation - however, interestingly, the relationship between updates and the likelihood of being retained is negative! We will need to investigate further.
+
+Let's first look at the number of days active.
+
+### Days Active in First Week
+Remember we define a user as "active" on a day if he or she creates at least one update with Buffer on that day. Let's look at the proportion of users that were retained for each number of days active in the first week on the Awesome plan.
+
+```{r echo = FALSE}
+awesome %>% 
+  group_by(days_active, plan_id, retained) %>% 
+  summarise(users = n_distinct(customer_id)) %>% 
+  mutate(percent = users / sum(users)) %>% 
+  filter(retained & !is.na(days_active)) %>% 
+  ggplot(aes(x = days_active, y = percent, color = plan_id)) +
+  geom_point() +
+  geom_line() +
+  theme_ipsum() +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Days Active", y = NULL,
+       title = "Retention Rate by Days Active", 
+       subtitle = "Success: Retained for Six Months",
+       color = "Plan Type")
+```
+
+We can see that, for monthly plans, being active for at least two days during the first week on the plan increases the likelihood of being retained, only by around 5% though.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+# define temp table
+temp <- data.frame(days_active = numeric(0), n_users = numeric(0), success_rate = numeric(0))
+
+# get success rates for each number of profiles
+for (i in 0:7) {
+  
+  # set days_active
+  days_active <- i
+  
+  # get number of users with at least that number
+  n_users <- nrow(filter(awesome, days_active >= i))
+  
+  # get success_rate
+  success <- awesome %>% 
+    filter(days_active >= i & plan_id == 'pro-monthly') %>% 
+    group_by(retained) %>% 
+    summarise(users = n_distinct(customer_id)) %>% 
+    mutate(percent = users / sum(users)) %>% 
+    filter(retained)
+  
+  success_rate = success[1, ]$percent
+  
+  row <- cbind(days_active, n_users, success_rate)
+  
+  temp <- rbind(temp, row)
+}
+
+# plot success rates
+ggplot(temp, aes(x = days_active, y = success_rate)) +
+  geom_line() +
+  geom_point() +
+  theme_ipsum() +
+  scale_y_continuous(labels = percent) +
+  labs(x = "N or More Days Active in First Week", y = NULL, title = "Six Month Retention Rate",
+       subtitle = "For Monthly Users Active at Least X Days in First Week")
+```
+
+We can see here that the biggest jump comes from being active at least two days. However, this jump is pretty small, only a couple of percentage points.
+
+### Number of Profiles
+We'll take the same approach for profiles.
+
+```{r echo = FALSE}
+# define cuts
+cuts <- c(-Inf, 0, 1, 3, 5, 10, Inf)
+
+# plot distribution of profiles
+awesome %>% 
+  mutate(profile_bin = cut(profiles, breaks = cuts)) %>% 
+  group_by(plan_id, profile_bin, retained) %>% 
+  summarise(users = n_distinct(customer_id)) %>% 
+  mutate(percent = users / sum(users)) %>% 
+  filter(retained) %>% 
+  ggplot(aes(x = profile_bin, y = percent, color = plan_id)) +
+  geom_point(size = 3) +
+  theme_ipsum() +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Number of Profiles", y = NULL, title = "Six Month Retention Rate by Profile Bin",
+       subtitle = "First Week on Awesome Plan", color = "Plan Type")
+```
+
+We can see the negative correlation between profiles added likelihook of being retained. There doesn't seem to be too much here...
+
+Let's look at updates.
+
+### Updates
+
+```{r}
+# define cuts
+cuts <- c(0, 10, 50, 100, 200, 500)
+
+# plot distribution of updates
+awesome %>% 
+  filter(plan_id == 'pro-monthly') %>% 
+  mutate(update_bin = cut(updates, breaks = cuts, include.lowest = TRUE)) %>% 
+  group_by(plan_id, update_bin, retained) %>% 
+  summarise(users = n_distinct(customer_id)) %>% 
+  mutate(percent = users / sum(users)) %>% 
+  filter(retained) %>% 
+  ggplot(aes(x = update_bin, y = percent)) +
+  geom_bar(stat = 'identity') +
+  theme_ipsum() +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Number of Updates", y = NULL, title = "Six Month Retention Rate by Update Bin",
+       subtitle = "First Week on Awesome Plan")
+```
+
+There does appear to be a jump when you go from 9-10 to 11-50 updates. Let's dig a little deeper.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+# define temp table
+temp <- data.frame(updates = numeric(0), n_users = numeric(0), success_rate = numeric(0))
+
+# get success rates for each number of profiles
+for (i in 0:50) {
+  
+  # set updates
+  updates <- i
+  
+  # get number of users with at least that number
+  n_users <- nrow(filter(awesome, updates >= i))
+  
+  # get success_rate
+  success <- awesome %>% 
+    filter(updates >= i & plan_id == 'pro-monthly') %>% 
+    group_by(retained) %>% 
+    summarise(users = n_distinct(customer_id)) %>% 
+    mutate(percent = users / sum(users)) %>% 
+    filter(retained)
+  
+  success_rate = success[1, ]$percent
+  
+  row <- cbind(updates, n_users, success_rate)
+  
+  temp <- rbind(temp, row)
+}
+
+# plot success rates
+ggplot(temp, aes(x = updates, y = success_rate)) +
+  geom_line() +
+  geom_point() +
+  theme_ipsum() +
+  scale_y_continuous(labels = percent) +
+  labs(x = "N or More Updates in First Week", y = NULL, title = "Six Month Retention Rate",
+       subtitle = "For Monthly Users With at Least X Updates in First Week")
+```
+
+Interestingly, there is a strong positive correlation until we reach around 15 updates. I suppose we could use 10 updates in the first week as an activation metric. I'm not sure.
+
+Let's suppose that we say that's it. A user is activated if he or she created 10 or more updates during the first week on the plan. How would that affect the retention rates?
+
+```{r}
+# define activation
+awesome %>% 
+  mutate(activated = updates >= 10) %>% 
+  group_by(activated, retained) %>% 
+  summarise(users = n_distinct(customer_id)) %>% 
+  mutate(percent = users / sum(users))
+```
+
+This might not be a good indicator. It only increases the likelihood of being retained by a few percentage points. :-\
